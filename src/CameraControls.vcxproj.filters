@@ -1,0 +1,183 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Plugin Core">
+      <UniqueIdentifier>{4b1b9f01-0000-4000-8000-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Plugin Core\Config">
+      <UniqueIdentifier>{4b1b9f01-0000-4000-8000-000000000002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Plugin Core\Helpers">
+      <UniqueIdentifier>{4b1b9f01-0000-4000-8000-000000000003}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SDK">
+      <UniqueIdentifier>{4b1b9f01-0000-4000-8000-000000000004}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SDK\Game">
+      <UniqueIdentifier>{4b1b9f01-0000-4000-8000-000000000005}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Vendor">
+      <UniqueIdentifier>{4b1b9f01-0000-4000-8000-000000000006}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Timeline">
+      <UniqueIdentifier>{4b1b9f01-0000-4000-8000-000000000007}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Game">
+      <UniqueIdentifier>{4b1b9f01-0000-4000-8000-000000000008}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="UI">
+      <UniqueIdentifier>{4b1b9f01-0000-4000-8000-000000000009}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(PluginSDKInclude)\plugin_interface.h">
+      <Filter>SDK</Filter>
+    </ClInclude>
+    <ClInclude Include="plugin.h">
+      <Filter>Plugin Core</Filter>
+    </ClInclude>
+    <ClInclude Include="plugin_config.h">
+      <Filter>Plugin Core\Config</Filter>
+    </ClInclude>
+    <ClInclude Include="plugin_helpers.h">
+      <Filter>Plugin Core\Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="json.hpp">
+      <Filter>Vendor</Filter>
+    </ClInclude>
+    <ClInclude Include="json_fwd.hpp">
+      <Filter>Vendor</Filter>
+    </ClInclude>
+    <ClInclude Include="cc_math.h">
+      <Filter>Timeline</Filter>
+    </ClInclude>
+    <ClInclude Include="timeline.h">
+      <Filter>Timeline</Filter>
+    </ClInclude>
+    <ClInclude Include="editor_state.h">
+      <Filter>Timeline</Filter>
+    </ClInclude>
+    <ClInclude Include="project_io.h">
+      <Filter>Timeline</Filter>
+    </ClInclude>
+    <ClInclude Include="camera_rig.h">
+      <Filter>Game</Filter>
+    </ClInclude>
+    <ClInclude Include="fly_controls.h">
+      <Filter>Game</Filter>
+    </ClInclude>
+    <ClInclude Include="player_safeguard.h">
+      <Filter>Game</Filter>
+    </ClInclude>
+    <ClInclude Include="player_vitals.h">
+      <Filter>Game</Filter>
+    </ClInclude>
+    <ClInclude Include="hud_visibility.h">
+      <Filter>Game</Filter>
+    </ClInclude>
+    <ClInclude Include="world_draw.h">
+      <Filter>Game</Filter>
+    </ClInclude>
+    <ClInclude Include="input_binds.h">
+      <Filter>Game</Filter>
+    </ClInclude>
+    <ClInclude Include="ui_theme.h">
+      <Filter>UI</Filter>
+    </ClInclude>
+    <ClInclude Include="ui_editor.h">
+      <Filter>UI</Filter>
+    </ClInclude>
+    <ClInclude Include="ui_timeline.h">
+      <Filter>UI</Filter>
+    </ClInclude>
+    <ClInclude Include="ui_properties.h">
+      <Filter>UI</Filter>
+    </ClInclude>
+    <ClInclude Include="ui_overlay.h">
+      <Filter>UI</Filter>
+    </ClInclude>
+    <ClInclude Include="ui_viewport.h">
+      <Filter>UI</Filter>
+    </ClInclude>
+    <ClInclude Include="viewport_fit.h">
+      <Filter>Game</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(StarRuptureSDKSourceDir)Basic.cpp">
+      <Filter>SDK\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="$(StarRuptureSDKSourceDir)CoreUObject_functions.cpp">
+      <Filter>SDK\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="$(StarRuptureSDKSourceDir)Engine_functions.cpp">
+      <Filter>SDK\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="$(StarRuptureSDKSourceDir)UMG_functions.cpp">
+      <Filter>SDK\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="$(StarRuptureSDKSourceDir)Chimera_functions.cpp">
+      <Filter>SDK\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="dllmain.cpp">
+      <Filter>Plugin Core</Filter>
+    </ClCompile>
+    <ClCompile Include="plugin.cpp">
+      <Filter>Plugin Core</Filter>
+    </ClCompile>
+    <ClCompile Include="plugin_config.cpp">
+      <Filter>Plugin Core\Config</Filter>
+    </ClCompile>
+    <ClCompile Include="timeline.cpp">
+      <Filter>Timeline</Filter>
+    </ClCompile>
+    <ClCompile Include="editor_state.cpp">
+      <Filter>Timeline</Filter>
+    </ClCompile>
+    <ClCompile Include="project_io.cpp">
+      <Filter>Timeline</Filter>
+    </ClCompile>
+    <ClCompile Include="camera_rig.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="fly_controls.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="player_safeguard.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="player_vitals.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="hud_visibility.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="world_draw.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="input_binds.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="ui_theme.cpp">
+      <Filter>UI</Filter>
+    </ClCompile>
+    <ClCompile Include="ui_editor.cpp">
+      <Filter>UI</Filter>
+    </ClCompile>
+    <ClCompile Include="ui_timeline.cpp">
+      <Filter>UI</Filter>
+    </ClCompile>
+    <ClCompile Include="ui_properties.cpp">
+      <Filter>UI</Filter>
+    </ClCompile>
+    <ClCompile Include="ui_overlay.cpp">
+      <Filter>UI</Filter>
+    </ClCompile>
+    <ClCompile Include="ui_viewport.cpp">
+      <Filter>UI</Filter>
+    </ClCompile>
+    <ClCompile Include="viewport_fit.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

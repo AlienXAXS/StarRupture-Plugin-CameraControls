@@ -1,0 +1,28 @@
+# Calls the centralised release workflow from the StarRupture Plugin SDK, which:
+#   - Generates a semantic version tag (bumps minor, or honours a `version` file)
+#   - Builds the plugin (<variant> Release)
+#   - Creates a per-plugin update manifest  (<PluginName>-client-manifest.json)
+#   - Bundles the DLL + sidecar JSON into a ZIP (<PluginName>-Client-vX.Y.Z.zip)
+#   - Publishes a GitHub Release with all three assets
+#
+# Rename plugin_name / solution_file below when you rename the plugin.
+
+name: Build and Release
+
+on:
+  workflow_dispatch:
+  # Uncomment to release automatically on every push to main:
+  # push:
+  #   branches: [ main ]
+  #   paths-ignore:
+  #     - '**/*.md'
+
+jobs:
+  release:
+    uses: AlienXAXS/StarRupture-Plugin-SDK/.github/workflows/plugin-release.yml@main
+    with:
+      plugin_name: CameraControls
+      solution_file: StarRupture-Plugin-CameraControls.sln
+      # variant: Client                # omit for Client (default), set to Server if needed
+      release_title: Camera Controls
+    secrets: inherit
