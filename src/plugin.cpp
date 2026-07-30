@@ -165,6 +165,8 @@ namespace
 			case Request::GotoSelected:               return "GotoSelected";
 			case Request::SnapCameraToPlayhead:       return "SnapCameraToPlayhead";
 			case Request::LookAtSelectionFromCamera:  return "LookAtSelectionFromCamera";
+			case Request::ConfirmOpenEditor:          return "ConfirmOpenEditor";
+			case Request::CancelOpenEditor:           return "CancelOpenEditor";
 			case Request::FireSelectedFunc:           return "FireSelectedFunc";
 			case Request::DumpControlProbe:           return "DumpControlProbe";
 			default:                                  return "?";
@@ -264,6 +266,52 @@ namespace
 	}
 
 	// -----------------------------------------------------------------------
+	// The pre-open notice
+	//
+	// Opening the editor moves the player's body out of the world, switches off
+	// the mechanisms that can kill it and takes the camera off the pawn; a
+	// timeline cue goes further still and starts a real rupture in the save being
+	// played. All of it is put back on the way out, and none of it can be
+	// promised -- a teardown step is allowed to fail, and a rupture has no undo.
+	//
+	// So it gets said once, in front of the person about to do it, rather than
+	// only in a README they have already not read. Once per plugin load and not
+	// once per open: advice repeated every time is advice nobody reads, and the
+	// editor is a thing people open dozens of times an evening.
+	// -----------------------------------------------------------------------
+	bool g_openNoticeAnswered = false;
+
+	void ShowOpenNotice(State& state)
+	{
+		state.confirmPending = true;
+
+		// RegisterWidget on its own gets no mouse: the modloader only suppresses
+		// game input while a token is held, so without this the notice is a
+		// picture of two buttons rather than two buttons. Same token the editor
+		// itself takes, and handed straight back when the notice is answered.
+		AcquireInput(CameraControlsConfig::Config::PassthroughInput());
+		UI::Editor::SetNoticeVisible(true);
+
+		LOG_INFO("Open notice shown -- waiting for an answer");
+	}
+
+	// Takes the notice down, whichever button did it.
+	//
+	// The token goes back rather than being left for EnterEditor to inherit.
+	// AcquireInput is idempotent, so inheriting it would work -- right up until
+	// EnterEditor refused for one of its own reasons and returned leaving a token
+	// nobody owns, which is the single worst failure this plugin has.
+	void DismissOpenNotice(State& state)
+	{
+		if (!state.confirmPending)
+			return;
+
+		state.confirmPending = false;
+		UI::Editor::SetNoticeVisible(false);
+		ReleaseInput();
+	}
+
+	// -----------------------------------------------------------------------
 	// Mode transitions -- all game thread, all called with the state lock held.
 	// -----------------------------------------------------------------------
 	void EnterEditor(State& state, double now)
@@ -271,10 +319,24 @@ namespace
 		if (state.mode != Mode::Off)
 			return;
 
+		// The notice is already up and waiting for an answer. Falling through
+		// would acquire a second input token on top of the one it holds, and only
+		// one of the two would ever be released.
+		if (state.confirmPending)
+			return;
+
 		if (!VerifyInChimeraMain())
 		{
 			SetStatus(state, now, "Camera Controls only works in-game -- load a save first");
 			LOG_WARN("EnterEditor refused: not in %s", kWorldName);
+			return;
+		}
+
+		// After the world check, so pressing the key in a menu still says "load a
+		// save first" rather than opening a notice about saving.
+		if (!g_openNoticeAnswered)
+		{
+			ShowOpenNotice(state);
 			return;
 		}
 
@@ -849,6 +911,21 @@ namespace
 		{
 			case Request::EnterEditor:   EnterEditor(state, now);   break;
 			case Request::ExitEditor:    ExitEditor(state, now);    break;
+
+			case Request::ConfirmOpenEditor:
+				g_openNoticeAnswered = true;
+				DismissOpenNotice(state);
+				EnterEditor(state, now);
+				break;
+
+			case Request::CancelOpenEditor:
+				// Deliberately *not* marking the notice answered. Nothing was
+				// agreed to, so the next press asks again -- somebody who backed
+				// out to go and save has been told the least of anyone.
+				DismissOpenNotice(state);
+				SetStatus(state, now, "Editor not opened -- save your game, then press again");
+				break;
+
 			case Request::StartPlayback: StartPlayback(state, now); break;
 			case Request::StopPlayback:  StopPlayback(state, now);  break;
 
@@ -1331,7 +1408,11 @@ namespace
 		// token, a step skipped by a fault rather than a throw: all of those end
 		// here instead of ending the session. Cheap, and the only recovery the
 		// player has that does not involve restarting the modloader.
-		if (state.mode == Mode::Off && g_inputToken)
+		//
+		// The pre-open notice is the one legitimate case of a token held with no
+		// mode active -- it needs one for its own buttons to be clickable -- so it
+		// is excluded rather than being rescued a frame after it appears.
+		if (state.mode == Mode::Off && !state.confirmPending && g_inputToken)
 		{
 			LOG_WARN("Tick: input token %p still held with no mode active -- releasing",
 			         g_inputToken);
@@ -1454,6 +1535,15 @@ namespace
 			TryStep("release input",  []       { ReleaseInput(); });
 			TryStep("release keys",   [&state] { Input::ReleaseAllKeys(state); });
 		}
+
+		// The notice holds an input token of its own and the check above does not
+		// cover it: the mode is still Off while it is up, so a world torn down
+		// with the notice on screen would leave the token held for good.
+		//
+		// `g_openNoticeAnswered` is deliberately *not* cleared here. Once answered
+		// it stays answered for as long as the plugin is loaded -- going back to
+		// the menu and loading another save does not re-ask.
+		TryStep("cancel open notice", [&state] { DismissOpenNotice(state); });
 
 		// Deliberately Forget rather than Release: the actors these modules
 		// cached are being torn down with the world, so reaching back through

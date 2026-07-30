@@ -41,6 +41,13 @@ namespace CameraControls
 		StartPlayback,
 		StopPlayback,
 
+		// The two buttons on the pre-open notice. Both have to be queued: the
+		// notice draws on the render thread, and answering it either opens the
+		// editor (every step of which is a UObject) or hands back the input
+		// token the notice is holding.
+		ConfirmOpenEditor,
+		CancelOpenEditor,
+
 		CaptureAppend,             // new keyframe at the live camera pose, at the end
 		CaptureInsertAfterSelected,// same, but spliced in after the selection
 		UpdateSelectedFromCamera,  // re-record the selected key's pose
@@ -188,6 +195,16 @@ namespace CameraControls
 	{
 		Mode      mode      = Mode::Off;
 		Timeline  timeline;
+
+		// True while the "open this on a save you can go back to" notice is on
+		// screen, before the editor has opened.
+		//
+		// The mode is still Off -- nothing in the world has been touched -- and an
+		// input token is held anyway, so the notice's buttons can be clicked. That
+		// pair is true nowhere else in this plugin, which is why the tick's
+		// leaked-token watchdog has to know about it: a token with no mode active
+		// is otherwise exactly the bug that watchdog exists to catch.
+		bool confirmPending = false;
 
 		Selection selection   = Selection::None;
 		uint32_t  selectedId  = 0;

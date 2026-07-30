@@ -355,7 +355,15 @@ namespace CameraControls::Input
 				// pause menu -- without this there is no reflex-level way out
 				// of a take that has gone wrong.
 				case Action::ExitPlayback:
-					if (state.mode == Mode::Playback)
+					// A dialog answers to Escape. This branch was dead in Mode::Off
+					// until the pre-open notice existed, and backing out of it is
+					// the only thing Escape can mean while it is on screen.
+					if (state.confirmPending)
+					{
+						LOG_TRACE("Input: escape dismissed the open notice");
+						Post(state, Request::CancelOpenEditor);
+					}
+					else if (state.mode == Mode::Playback)
 					{
 						LOG_TRACE("Input: escape out of playback");
 						Post(state, Request::StopPlayback);

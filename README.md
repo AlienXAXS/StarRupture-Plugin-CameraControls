@@ -49,7 +49,9 @@ game's actual camera.
 ## Getting started
 
 1. Load a save.
-2. Press **F7** to open the editor.
+2. Press **F7** to open the editor. The first press shows a short notice — the editor takes your character out of the
+   world while it is open, and a timeline cue can start a real rupture in the save you are playing, so it asks you to
+   save first. Answer it once and it stays out of the way until the game is restarted.
 3. Fly to where the shot should start and press **K** to drop the first keyframe.
 4. Fly somewhere else, press **K** again. Repeat.
 5. Press **Space** to preview, or **F8** to run it properly.

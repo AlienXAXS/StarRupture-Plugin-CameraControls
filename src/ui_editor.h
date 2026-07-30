@@ -21,6 +21,11 @@ namespace CameraControls::UI::Editor
 	// a mode change, and when the user toggles the UI off with F9.
 	void SetVisible(bool visible);
 
+	// Shows or hides the pre-open notice. Separate from SetVisible because it is
+	// the one piece of this UI that appears while the mode is still Off -- and it
+	// must not come back with the editor windows when F9 shows them again.
+	void SetNoticeVisible(bool visible);
+
 	// Re-frames the timeline view. Called when the editor is opened, not every
 	// time the windows come back, so a hide/show round trip keeps the zoom.
 	void ResetView();

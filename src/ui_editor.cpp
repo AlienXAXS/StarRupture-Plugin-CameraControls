@@ -23,6 +23,7 @@ namespace CameraControls::UI::Editor
 		WidgetHandle g_timelineWidget   = nullptr;
 		WidgetHandle g_propertiesWidget = nullptr;
 		WidgetHandle g_overlayWidget    = nullptr;
+		WidgetHandle g_noticeWidget     = nullptr;
 
 		TimelineView::ViewState g_view;
 
@@ -45,6 +46,18 @@ namespace CameraControls::UI::Editor
 			PluginWindowFlags_NoTitleBar | PluginWindowFlags_NoResize | PluginWindowFlags_NoMove |
 			PluginWindowFlags_NoBackground | PluginWindowFlags_NoScrollbar |
 			PluginWindowFlags_NoMouseInputs | PluginWindowFlags_NoSavedSettings
+		};
+
+		// The pre-open notice, shown once per session before the editor is first
+		// opened. A dialog, so it keeps its title bar and sits in the
+		// middle of the window rather than docking to an edge like the panels --
+		// and it is a widget of its own rather than something drawn on the overlay
+		// because the overlay is NoMouseInputs. A notice whose buttons cannot be
+		// clicked would be worse than no notice at all.
+		PluginWindowHints g_noticeHints = {
+			520.0f, 300.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0,
+			PluginWindowFlags_NoResize | PluginWindowFlags_NoMove |
+			PluginWindowFlags_NoSavedSettings
 		};
 
 		// Recomputed every frame from GetDisplaySize.
@@ -118,6 +131,14 @@ namespace CameraControls::UI::Editor
 			g_propertiesHints.height = screenH;
 			g_propertiesHints.pos_x  = screenW - g_propertiesWidth;
 			g_propertiesHints.pos_y  = 0.0f;
+
+			// Centred rather than docked. Sized from its own top-left rather than
+			// through the hints' pivot, so it does not depend on the modloader
+			// honouring one -- the panels have never used it either.
+			g_noticeHints.width  = Clamp(screenW * 0.34f, 440.0f, 640.0f);
+			g_noticeHints.height = Clamp(screenH * 0.38f, 280.0f, 400.0f);
+			g_noticeHints.pos_x  = (screenW - g_noticeHints.width)  * 0.5f;
+			g_noticeHints.pos_y  = (screenH - g_noticeHints.height) * 0.5f;
 
 			// --- Where the game itself gets to draw -----------------------
 			const bool squeeze = state.options.fitViewport &&
@@ -549,6 +570,62 @@ namespace CameraControls::UI::Editor
 			Viewport::Render(ui, state, now);
 			Overlay::Render(ui, state, now);
 		}
+
+		// -------------------------------------------------------------------
+		// The pre-open notice
+		//
+		// Both buttons only post. Opening the editor is a page of UObject work and
+		// this is the render thread; even Cancel has to be queued, because the
+		// input token the notice is holding is released by the same code that
+		// releases the editor's.
+		//
+		// The window is hidden whenever this is not pending, so the early return
+		// is belt and braces -- the modloader begins and ends the window around
+		// this callback, and a visible window that drew nothing would be an empty
+		// title bar in the middle of the screen.
+		// -------------------------------------------------------------------
+		void RenderNoticeWindow(IModLoaderImGui* ui)
+		{
+			auto lock = Lock();
+			State& state = Get();
+
+			if (!state.confirmPending)
+				return;
+
+			ui->Spacing();
+			TextColored(ui, kKeyframe, "Open this on a save you can go back to.");
+			ui->Spacing();
+
+			ui->TextWrapped("While the editor is open your character is taken out of the world: "
+			                "the body is moved somewhere safe, the things that can kill it are "
+			                "switched off, and the camera comes off the pawn. Leaving the editor "
+			                "puts all of that back.");
+			ui->Spacing();
+			ui->TextWrapped("Timeline cues go further. A rupture one starts is a real rupture, in "
+			                "the save you are actually playing, and nothing here can undo it.");
+			ui->Spacing();
+			ui->TextWrapped("Save the game first, or fly on a save you would not mind reloading.");
+
+			ui->Spacing();
+			ui->Separator();
+			ui->Spacing();
+
+			const float h = ui->GetFrameHeight() * 1.4f;
+
+			float availX = 0.0f, availY = 0.0f;
+			ui->GetContentRegionAvail(&availX, &availY);
+			const float w = (availX - 8.0f) * 0.5f;
+
+			if (AccentButton(ui, "I have saved -- open it##noticeOk", w, h))
+				Post(state, Request::ConfirmOpenEditor);
+
+			ui->SameLine(0.0f, 8.0f);
+			if (ui->ButtonSized("Not now##noticeCancel", w, h))
+				Post(state, Request::CancelOpenEditor);
+
+			ui->Spacing();
+			ui->TextDisabled("Shown once per session.");
+		}
 	}
 
 	void Register(IPluginSelf* self)
@@ -564,14 +641,17 @@ namespace CameraControls::UI::Editor
 		static PluginWidgetDesc timelineDesc   = { "Camera Timeline",   &RenderTimelineWindow,   &g_timelineHints };
 		static PluginWidgetDesc propertiesDesc = { "Camera Properties", &RenderPropertiesWindow, &g_propertiesHints };
 		static PluginWidgetDesc overlayDesc    = { "CameraControlsOverlay", &RenderOverlayWindow, &g_overlayHints };
+		static PluginWidgetDesc noticeDesc     = { "Camera Controls",   &RenderNoticeWindow,     &g_noticeHints };
 
 		g_timelineWidget   = uiEvents->RegisterWidget(&timelineDesc);
 		g_propertiesWidget = uiEvents->RegisterWidget(&propertiesDesc);
 		g_overlayWidget    = uiEvents->RegisterWidget(&overlayDesc);
+		g_noticeWidget     = uiEvents->RegisterWidget(&noticeDesc);
 
 		SetVisible(false);
-		LOG_INFO("Editor: widgets registered (timeline=%p properties=%p overlay=%p)",
-		         g_timelineWidget, g_propertiesWidget, g_overlayWidget);
+		SetNoticeVisible(false);
+		LOG_INFO("Editor: widgets registered (timeline=%p properties=%p overlay=%p notice=%p)",
+		         g_timelineWidget, g_propertiesWidget, g_overlayWidget, g_noticeWidget);
 	}
 
 	void Unregister(IPluginSelf* self)
@@ -584,6 +664,7 @@ namespace CameraControls::UI::Editor
 		if (g_timelineWidget)   { uiEvents->UnregisterWidget(g_timelineWidget);   g_timelineWidget   = nullptr; }
 		if (g_propertiesWidget) { uiEvents->UnregisterWidget(g_propertiesWidget); g_propertiesWidget = nullptr; }
 		if (g_overlayWidget)    { uiEvents->UnregisterWidget(g_overlayWidget);    g_overlayWidget    = nullptr; }
+		if (g_noticeWidget)     { uiEvents->UnregisterWidget(g_noticeWidget);     g_noticeWidget     = nullptr; }
 	}
 
 	void SetVisible(bool visible)
@@ -599,6 +680,16 @@ namespace CameraControls::UI::Editor
 		if (g_timelineWidget)   hooks->UI->SetWidgetVisible(g_timelineWidget,   visible);
 		if (g_propertiesWidget) hooks->UI->SetWidgetVisible(g_propertiesWidget, visible);
 		if (g_overlayWidget)    hooks->UI->SetWidgetVisible(g_overlayWidget,    true);
+	}
+
+	void SetNoticeVisible(bool visible)
+	{
+		auto* hooks = GetHooks();
+		if (!hooks || !hooks->UI || !g_noticeWidget)
+			return;
+
+		LOG_DEBUG("Editor: notice %s", visible ? "shown" : "hidden");
+		hooks->UI->SetWidgetVisible(g_noticeWidget, visible);
 	}
 
 	ScreenRect CurrentGameRect()
