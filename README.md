@@ -27,11 +27,13 @@ game's actual camera.
 - **Click keyframes in the 3D view.** Every keyframe gets an on-screen handle you can click and double-click, not just
   a row on the timeline.
 - **The game view moves out from under the panels.** Rather than covering your shot with the timeline and the
-  inspector, the editor shrinks the game's own 3D view into the space they leave free, like the viewer in an editing
-  program. It keeps the window's shape, so what you frame is exactly what a full-screen playback records.
-- **Your body is looked after — and comes with you.** While the camera is detached your character is frozen and towed
-  along underneath it, which keeps it out of harm's way *and* keeps the world streaming in around the shot. Everything
-  is put back exactly where it was.
+  inspector, the editor frames the game's own 3D view into the space they leave free, like the viewer in an editing
+  program. Note that it **crops** rather than scales — see the caveat under Layout — so playback shows more than the
+  preview. Turn it off when the exact framing matters.
+- **Your body is looked after.** While the camera is detached your character is frozen, buried far below the terrain in
+  a habitat shelter, and made unkillable — the world's out-of-bounds kill and the pawn's damage flag are switched off,
+  so a radiation field or a lethal drop cannot end the take on the respawn screen. Everything is put back exactly where
+  it was.
 
 ---
 
@@ -64,6 +66,7 @@ All of these are rebindable from the ModLoader's plugin config UI (or `CameraCon
 | `Left Shift` / `Left Ctrl` | Fly faster / slower (hold) |
 | Right mouse (hold) | Look around |
 | `Z` / `C` | Roll left / right |
+| `X` | Level the camera — zero all rotation without moving it |
 | `R` / `F` | Zoom in / out (FOV) |
 | `K` | Add a keyframe at the camera |
 | `Shift+K` | Insert a keyframe after the selected one |
@@ -72,6 +75,7 @@ All of these are rebindable from the ModLoader's plugin config UI (or `CameraCon
 | `Delete` | Delete the selected keyframe |
 | `,` / `.` | Select the previous / next keyframe |
 | `Space` | Preview play / pause |
+| `Home` | Write a diagnostic snapshot of the player's control state to the log (works any time, see below) |
 
 **On the timeline:** click a keyframe to select it, drag it to retime, double-click it to fly there, click a clip to
 select the segment, wheel to zoom about the cursor, middle-drag to pan. The `-60 … +60` nudge buttons move the
@@ -115,22 +119,48 @@ Two problems, one solution.
 The obvious one: the moment the camera detaches, your body is left standing in the open and fully simulated. A
 five-minute shot is a five-minute free hit for anything nearby.
 
-The less obvious one: StarRupture streams its world around the **player**, not around the view. Park the body at base,
-fly the camera a kilometre away, and you are filming empty terrain — the Mass subsystem never spawned anything out
-there.
+On entering the editor the plugin snapshots your transform, movement mode and gravity scale, freezes you (movement mode
+`None`, no gravity, zero velocity) and **buries you**: your X and Y are kept, your Z is set to `-3500`, and a habitat
+shelter is spawned around you so you have a floor and four walls. Several thousand units under the terrain there is
+nothing to shoot you, nothing to walk into you and no volume containing you. On exit you are teleported back and your
+movement state restored exactly.
 
-So the body is not parked, it rides along. On entering the editor the plugin snapshots your transform, movement mode
-and gravity scale, then freezes you (movement mode `None`, no gravity, zero velocity) and teleports you to a fixed
-offset from the camera every tick — 400 units below it by default, which keeps you under the terrain when filming near
-the ground and out of frame when filming from the air. Set the offset positive to ride above the camera instead. On
-exit everything is restored exactly.
+That altitude is absolute, not a drop from where you were standing — the same relative drop is deep bedrock from a
+cliff top and may not clear the floor from a canyon bottom. One number should mean one place.
 
-A person-sized marker is drawn at the stash point by default so you can see it keeping up. There is also an
-**experimental** option to spawn a `BP_HabitatBig_C` shelter around the body, which travels with it — a full building
-actor appearing out of nowhere is not something every game build enjoys, so it is off by default.
+The body **does not follow the camera.** It used to, on the theory that the world streams around the *player*, so the
+body had to chase the shot or you would be filming unstreamed terrain. That turned out to be both unnecessary and
+harmful:
 
-This is deliberately *not* god mode — nothing touches your health, and if you turn the safeguard off you are on your
-own.
+- Unnecessary, because a UE `APlayerController` is itself a World Partition streaming source, and
+  `GetStreamingSourceLocationAndRotation` is `GetPlayerViewPoint` — which follows the view target, which is our camera.
+  The shot already pulls the world in around itself. `camera_rig::Activate` forces `bEnableStreamingSource` on and logs
+  the prior value, so this stays verifiable rather than assumed.
+- Harmful, because towing walked the body through every radiation field, kill volume and lethal drop the camera flew
+  through, and a kill trigger ends the take on the respawn screen.
+
+A person-sized marker is drawn at the stash point by default so you can see where it went.
+
+### Not dying
+
+The game has kill triggers that do not drain a meter, they just kill: the world's own out-of-bounds plane, pain
+volumes, hazard fields. Locking the survival meters cannot help with those, because an instant kill happens inside a
+single frame and writing health back to full on the next tick does not un-die you — you are already on the respawn
+screen with the take lost.
+
+So `death_guard` removes the mechanisms instead of repairing the damage, and puts every one of them back verbatim on
+exit:
+
+| Layer | What it does | Default |
+|---|---|---|
+| World bounds | Clears `AWorldSettings::bEnableWorldBoundsChecks` and floors `KillZ` — the "went too low" death | on |
+| Damage | Clears `AActor::bCanBeDamaged` on the pawn, re-asserted every tick because the game rewrites it | on |
+| Game immortality | Calls the game's own `UCrCheatManager::Immortal` exec, via `APlayerController::EnableCheats` | **off** |
+
+The third layer is the only one that also covers damage applied through the game's ability system, because it is the
+game's own code rather than our guess at it. It is off by default because getting there means asking the player
+controller to instantiate the game's cheat manager, and it stays instantiated for the rest of the session. Turn it on
+if you are still dying with everything else enabled.
 
 ---
 
@@ -148,6 +178,32 @@ input ImGui is actually using that frame — mouse while the cursor is over a wi
 focus. Everything else, including raw mouse deltas, reaches the game.
 
 Playback mode always takes exclusive capture, whatever this is set to.
+
+### Getting your keys back after leaving the editor
+
+Taking the camera off your character makes the game strip that character's key mappings — 73 of them drop to 11,
+leaving only menu and cheat keys — and it never puts them back. That is why the character used to stop responding to
+WASD after a session.
+
+The plugin repairs it on the way out, and the repair is on by default (`[Editor] RestoreInputConfigs`). You should
+not have to do anything. If you ever do lose your keys, closing and re-opening the editor retries the repair.
+
+### If something still will not respond
+
+Press **`Home`**. It writes a full snapshot of everything that can stop a character responding to input — the
+controller's ignore-input counters, view target, possessed pawn, input component, movement mode, the game's own
+character state, the live input mappings, and whether the game window even has OS keyboard focus — to the log at
+`VeryVerbose`, diffed against the previous snapshot and against the state before the editor was opened.
+
+If the on-screen status does *not* say "Control probe written to the log" when you press it, that is itself the
+finding: keybinds are not reaching the plugin, so the problem is in front of anything the log could tell you.
+
+The most useful line is `InputMappings: live set`, which names every mapping as `Action/Key`. Diffing that against a
+working one is how every version of this bug was actually found — the counts only ever said "wrong", never *what*.
+
+The other half lives in the ModLoader: turn on **ModLoader Debug Values** in its Global Settings to see whether a
+plugin is still holding an input token, and which one. The plugin and the loader record that independently, because
+the two disagreeing is one of the specific things worth catching.
 
 ---
 
@@ -184,8 +240,9 @@ This is a client-only plugin — there is no camera to drive on a dedicated serv
 | [`src/fly_controls.{h,cpp}`](src/fly_controls.h) | Free-fly integration |
 | [`src/input_binds.{h,cpp}`](src/input_binds.h) | Keybind registration and mouse look |
 | [`src/player_safeguard.{h,cpp}`](src/player_safeguard.h) | Stashing and restoring the player |
+| [`src/death_guard.{h,cpp}`](src/death_guard.h) | Switching off the kill triggers while filming |
 | [`src/hud_visibility.{h,cpp}`](src/hud_visibility.h) | Hiding the game's UMG HUD |
 | [`src/world_draw.{h,cpp}`](src/world_draw.h) | In-world spline and keyframe gizmos |
-| [`src/viewport_fit.{h,cpp}`](src/viewport_fit.h) | Squeezing the game's 3D view in beside the panels |
+| [`src/viewport_fit.{h,cpp}`](src/viewport_fit.h) | Masking the game's 3D view in beside the panels |
 | [`src/project_io.{h,cpp}`](src/project_io.h) | JSON project save / load |
 | [`src/ui_*.{h,cpp}`](src/ui_editor.h) | Timeline widget, property inspector, viewport picking, overlays, theme |

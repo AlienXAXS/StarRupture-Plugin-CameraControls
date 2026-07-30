@@ -28,7 +28,21 @@ namespace CameraControls::Vitals
 
 	// True if the last Pin() found a character with attribute sets to write to,
 	// so the UI can say whether the lock is actually doing anything.
+	//
+	// Only meaningful while something is still calling Pin(): the flag records
+	// what the last call managed, not whether pinning is ongoing. Stop() is what
+	// makes it stop claiming otherwise.
 	bool IsActive();
+
+	// Clears the active flag when the editor stops driving Pin().
+	//
+	// There is nothing to restore here -- pinned attributes are deliberately left
+	// topped up -- but the flag is read by the inspector and by control_probe, and
+	// left set it reports attributes being held steady when nothing has touched
+	// them since the editor closed. A diagnostic reporting stale state is worse
+	// than one reporting nothing, because it sends the reader somewhere real to
+	// look for a problem that is not there.
+	void Stop();
 
 	void ForgetWorldState();
 }

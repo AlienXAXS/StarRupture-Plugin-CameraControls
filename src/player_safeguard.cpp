@@ -18,28 +18,20 @@ namespace CameraControls::Safeguard
 
 		// How far below the body the habitat sits, so the body ends up standing
 		// on its floor rather than buried in it.
-		constexpr double kHabitatFloorOffset = 600.0;
+		constexpr double kHabitatFloorOffset = 200.0;
 
 		// Don't chase movement smaller than this. A quarter of a metre of slack
 		// is invisible and saves a move call on almost every frame.
-		constexpr double kFollowSlack = 25.0;
+		constexpr double kStashSlack = 25.0;
 
-		// The body is a World Partition streaming source, so moving it in one
-		// jump makes the engine block on loading the cells it landed in -- which
-		// is the loading screen you get when the camera flies any distance.
-		// Below the snap threshold it is moved continuously instead, capped at
-		// this speed, and streaming keeps up without ever stalling.
-		constexpr double kFollowSpeed    = 4000.0;   // uu/s
-		constexpr double kSnapDistance   = 6000.0;   // beyond this, accept one hitch
+		// Hold() runs every tick, so neither failures nor corrections there may
+		// spam the log -- both are edge-triggered.
+		bool g_holdWarned = false;
+		bool g_drifted    = false;
 
-		// Where the body is heading. Kept separate from its actual position so
-		// the smoothing has something stable to aim at.
-		SDK::FVector g_followTarget{};
-
-		// Follow() runs every tick, so neither failures nor mode changes there
-		// may spam the log -- both are edge-triggered.
-		bool g_followWarned = false;
-		bool g_wasSnapping  = false;
+		// How many ticks after Release() to keep checking that the body really did
+		// come back. About two seconds at 60fps.
+		constexpr int kRestoreRetries = 120;
 
 		struct Snapshot
 		{
@@ -54,6 +46,22 @@ namespace CameraControls::Safeguard
 		Snapshot     g_snapshot;
 		SDK::FVector g_stashLocation{};
 		SDK::AActor* g_habitat = nullptr;
+
+		// --- Restore verification --------------------------------------------
+		//
+		// The single worst outcome this module has is a body that stays down the
+		// hole in MOVE_None: from the player's chair that is indistinguishable
+		// from the plugin having broken their game, and there is no in-game way
+		// back from it. So Release() does not trust its own work -- it checks,
+		// and if the body is still stashed or still frozen it keeps re-applying
+		// for a couple of seconds afterwards.
+		//
+		// Deliberately outside ForgetWorldState's remit in Release (it is armed
+		// after that call), but cleared by it on world teardown, where retrying
+		// against a dying world would be the wrong thing.
+		Snapshot     g_pendingRestore;
+		SDK::FVector g_pendingStash{};
+		int          g_restoreRetries = 0;
 
 		SDK::UWorld* GetWorld()
 		{
@@ -77,6 +85,31 @@ namespace CameraControls::Safeguard
 			{
 				return nullptr;
 			}
+		}
+
+		// "Is the body still down the hole?" -- the test that matters, rather than
+		// "is it near where it started". Where it ends up after the movement mode
+		// comes back is not knowable (it falls, it settles, the floor nudges it),
+		// but the stash point is a single known coordinate and being within a few
+		// metres of it after a restore means the restore did not happen.
+		bool NearStash(const SDK::FVector& location, const SDK::FVector& stash)
+		{
+			const double dx = location.X - stash.X;
+			const double dy = location.Y - stash.Y;
+			const double dz = location.Z - stash.Z;
+			return (dx * dx + dy * dy + dz * dz) < (500.0 * 500.0);
+		}
+
+		bool StillAtStash(const SDK::FVector& location)
+		{
+			return NearStash(location, g_stashLocation);
+		}
+
+		// Same test, against the copy the retry pass kept -- by the time it runs,
+		// ForgetWorldState has cleared the live one.
+		bool StillAtPendingStash(const SDK::FVector& location)
+		{
+			return NearStash(location, g_pendingStash);
 		}
 
 		void EnterStasis(SDK::ACharacter* character)
@@ -154,12 +187,13 @@ namespace CameraControls::Safeguard
 
 	void ForgetWorldState()
 	{
-		g_engaged  = false;
-		g_habitat  = nullptr;
-		g_snapshot = Snapshot{};
+		g_engaged        = false;
+		g_habitat        = nullptr;
+		g_snapshot       = Snapshot{};
+		g_restoreRetries = 0;
 	}
 
-	bool Engage(const Vec3& initialStash, bool spawnHabitat)
+	bool Engage(double stashAltitude, bool spawnHabitat)
 	{
 		if (g_engaged)
 			return true;
@@ -192,19 +226,27 @@ namespace CameraControls::Safeguard
 			// fighting the pin.
 			EnterStasis(character);
 
-			// Move to the pod position straight away rather than waiting for the
-			// first Follow(). Spawning the habitat around the player's original
-			// spot and only then sliding both away is what made the shelter
-			// appear at the player rather than under the floor.
-			g_stashLocation = SDK::FVector(initialStash.x, initialStash.y, initialStash.z);
-			g_followTarget  = g_stashLocation;
-			g_followWarned  = false;
-			g_wasSnapping   = false;
-			g_engaged       = true;
+			// Straight down, to a fixed altitude rather than a fixed drop. An
+			// absolute Z is deliberate: a relative one would put the body a few
+			// thousand units under wherever the player happened to be standing,
+			// which on a cliff top is deep bedrock and at the bottom of a canyon
+			// might not clear the floor at all. One number, one outcome, wherever
+			// the editor is opened.
+			//
+			// X and Y are kept, so the body stays under the same streaming cell
+			// and the same set of hazard volumes the player already chose to be in.
+			g_stashLocation   = g_snapshot.location;
+			g_stashLocation.Z = stashAltitude;
+			g_holdWarned      = false;
+			g_drifted         = false;
+			g_engaged         = true;
 
 			SDK::FHitResult hit{};
 			character->K2_SetActorLocation(g_stashLocation, false, &hit, true);
 
+			// After the move, not before: the shelter has to end up around where
+			// the body arrived. Spawning it first and then teleporting away is
+			// what used to leave the habitat standing at the player's old feet.
 			if (spawnHabitat)
 			{
 				SDK::UWorld* world = GetWorld();
@@ -219,7 +261,7 @@ namespace CameraControls::Safeguard
 			LOG_INFO("Safeguard: stashed at %.0f,%.0f,%.0f (from %.0f,%.0f,%.0f)%s",
 			         g_stashLocation.X, g_stashLocation.Y, g_stashLocation.Z,
 			         g_snapshot.location.X, g_snapshot.location.Y, g_snapshot.location.Z,
-			         g_habitat ? " inside a habitat" : "");
+			         g_habitat ? " inside a habitat" : " with no shelter");
 			return true;
 		}
 		catch (const std::exception& e)
@@ -236,7 +278,7 @@ namespace CameraControls::Safeguard
 		}
 	}
 
-	void Follow(const Vec3& cameraLocation, const Vec3& offset, double deltaSeconds)
+	void Hold()
 	{
 		if (!g_engaged)
 			return;
@@ -247,9 +289,6 @@ namespace CameraControls::Safeguard
 
 		try
 		{
-			const Vec3 want = cameraLocation + offset;
-			g_followTarget = SDK::FVector(want.x, want.y, want.z);
-
 			// Re-assert stasis every frame rather than trusting it to hold: a
 			// knockback, a ragdoll or the movement component recovering on its
 			// own would otherwise walk the body out of the pod.
@@ -263,75 +302,41 @@ namespace CameraControls::Safeguard
 
 			const SDK::FVector current = character->K2_GetActorLocation();
 
-			double dx = g_followTarget.X - current.X;
-			double dy = g_followTarget.Y - current.Y;
-			double dz = g_followTarget.Z - current.Z;
+			const double dx = g_stashLocation.X - current.X;
+			const double dy = g_stashLocation.Y - current.Y;
+			const double dz = g_stashLocation.Z - current.Z;
 			const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-			if (distance <= kFollowSlack)
+			// Nothing should be moving the body at all now that it is not being
+			// towed, so drift means something else pushed it -- worth knowing
+			// about once, and worth undoing every frame.
+			if (distance <= kStashSlack)
 				return;
 
-			SDK::FVector next = g_followTarget;
-
-			// State-change only. This runs every tick, so anything logged
-			// unconditionally here would bury the rest of the log.
-			const bool snapping = distance >= kSnapDistance;
-			if (snapping != g_wasSnapping)
+			if (!g_drifted)
 			{
-				g_wasSnapping = snapping;
-				LOG_DEBUG("Safeguard: follow switched to %s (distance %.0f)",
-				          snapping ? "snap" : "smooth", distance);
+				g_drifted = true;
+				LOG_DEBUG("Safeguard: body drifted %.0f off the stash point -- "
+				          "putting it back (logged once)", distance);
 			}
-
-			if (distance < kSnapDistance)
-			{
-				// Step towards the target at a capped speed. Continuous motion
-				// lets World Partition stream in ahead of the body instead of
-				// blocking on a jump.
-				const double step = kFollowSpeed * Clamp(deltaSeconds, 0.0, 0.1);
-				if (step < distance)
-				{
-					const double scale = step / distance;
-					next.X = current.X + dx * scale;
-					next.Y = current.Y + dy * scale;
-					next.Z = current.Z + dz * scale;
-				}
-			}
-			// else: a deliberate jump (the camera was flown to a keyframe far
-			// away). One hitch is better than the body trailing for ten seconds
-			// with nothing streamed in around the shot.
 
 			// SetActorLocation, not TeleportTo: TeleportTo runs encroachment
 			// checks and a full teleport path, which is both slower and far more
 			// likely to trip a blocking stream than a plain move.
 			SDK::FHitResult hit{};
-			character->K2_SetActorLocation(next, /*bSweep=*/false, &hit, /*bTeleport=*/true);
-
-			// The marker tracks where the body actually is, not where it is
-			// heading -- otherwise it runs ahead during a long catch-up.
-			g_stashLocation = next;
-
-			// The shelter rides along, otherwise it is a box the body left
-			// behind on the first camera move.
-			if (g_habitat)
-			{
-				SDK::FVector habitatLocation = next;
-				habitatLocation.Z -= kHabitatFloorOffset;
-
-				SDK::FHitResult habitatHit{};
-				g_habitat->K2_SetActorLocation(habitatLocation, false, &habitatHit, true);
-			}
+			character->K2_SetActorLocation(g_stashLocation, /*bSweep=*/false, &hit,
+			                               /*bTeleport=*/true);
 		}
 		catch (...)
 		{
 			// Emphatically NOT ForgetWorldState(): the snapshot is the only
 			// record of where the player came from, and throwing it away over a
-			// transient per-frame failure is what stranded the body at the
-			// camera with no way to put it back. Skip this frame, try the next.
-			if (!g_followWarned)
+			// transient per-frame failure is what stranded the body with no way
+			// to put it back. Skip this frame, try the next.
+			if (!g_holdWarned)
 			{
-				LOG_WARN("Safeguard: Follow threw -- skipping this frame (logged once)");
-				g_followWarned = true;
+				LOG_WARN("Safeguard: Hold threw -- skipping this frame (logged once)");
+				g_holdWarned = true;
 			}
 		}
 	}
@@ -350,6 +355,12 @@ namespace CameraControls::Safeguard
 
 		SDK::ACharacter* character = GetLocalCharacter();
 
+		// Captured before ForgetWorldState wipes them, so the retry pass below
+		// still knows where the body was meant to end up.
+		const Snapshot     snapshot = g_snapshot;
+		const SDK::FVector stash    = g_stashLocation;
+		bool               armRetry = false;
+
 		try
 		{
 			if (character && g_snapshot.valid)
@@ -365,7 +376,25 @@ namespace CameraControls::Safeguard
 				// leaves the movement component with a floor cache for a place
 				// the character is about to stop being, and it stays stuck --
 				// which is why control did not come back.
+				//
+				// TeleportTo first, because it finds a free spot rather than
+				// stuffing the capsule into whatever happens to be there. But it
+				// also runs encroachment checks and is allowed to *fail*, and a
+				// failure leaves the body several thousand units down in solid
+				// rock. So if it did not move, force it: a body in slightly the
+				// wrong place is recoverable, a body still in the hole is not.
 				character->K2_TeleportTo(g_snapshot.location, g_snapshot.rotation);
+
+				if (StillAtStash(character->K2_GetActorLocation()))
+				{
+					LOG_WARN("Safeguard: TeleportTo would not move the body out of the stash "
+					         "-- forcing it to %.0f,%.0f,%.0f",
+					         g_snapshot.location.X, g_snapshot.location.Y, g_snapshot.location.Z);
+
+					SDK::FHitResult hit{};
+					character->K2_SetActorLocation(g_snapshot.location, /*bSweep=*/false, &hit,
+					                               /*bTeleport=*/true);
+				}
 
 				if (character->CharacterMovement)
 				{
@@ -405,9 +434,10 @@ namespace CameraControls::Safeguard
 					LOG_WARN("Safeguard: clearing the input flags threw");
 				}
 
-				// Report what we actually ended up with. If control still does
-				// not come back, this line says whether the teleport and the
-				// movement mode took effect at all.
+				// Report what we actually ended up with, and decide whether to
+				// keep working on it. If control still does not come back, this
+				// line says whether the teleport and the movement mode took
+				// effect at all.
 				try
 				{
 					const SDK::FVector back = character->K2_GetActorLocation();
@@ -417,6 +447,17 @@ namespace CameraControls::Safeguard
 					         back.X, back.Y, back.Z,
 					         g_snapshot.location.X, g_snapshot.location.Y, g_snapshot.location.Z,
 					         mode);
+
+					const bool stuckInHole = StillAtStash(back);
+					const bool frozen      = mode == static_cast<int>(SDK::EMovementMode::MOVE_None);
+
+					if (stuckInHole || frozen)
+					{
+						LOG_WARN("Safeguard: the body did not come back cleanly (inHole=%d frozen=%d)"
+						         " -- retrying for the next %d ticks",
+						         stuckInHole ? 1 : 0, frozen ? 1 : 0, kRestoreRetries);
+						armRetry = true;
+					}
 				}
 				catch (...) {}
 			}
@@ -445,6 +486,79 @@ namespace CameraControls::Safeguard
 		}
 
 		ForgetWorldState();
+
+		// After ForgetWorldState, not before -- it clears the retry counter, which
+		// is exactly what we want on a world teardown and exactly what we do not
+		// want here.
+		if (armRetry)
+		{
+			g_pendingRestore = snapshot;
+			g_pendingStash   = stash;
+			g_restoreRetries = kRestoreRetries;
+		}
+
 		LOG_INFO("Safeguard: player restored");
+	}
+
+	void VerifyRestore()
+	{
+		if (g_restoreRetries <= 0)
+			return;
+
+		SDK::ACharacter* character = GetLocalCharacter();
+		if (!character)
+		{
+			// No pawn to work on yet -- respawning, or mid-travel. Burn a retry
+			// rather than giving up: the pawn usually comes back within a frame or
+			// two, and that is precisely the case worth waiting for.
+			--g_restoreRetries;
+			return;
+		}
+
+		try
+		{
+			bool settled = true;
+
+			if (StillAtPendingStash(character->K2_GetActorLocation()))
+			{
+				SDK::FHitResult hit{};
+				character->K2_SetActorLocation(g_pendingRestore.location, /*bSweep=*/false, &hit,
+				                               /*bTeleport=*/true);
+				settled = false;
+			}
+
+			if (character->CharacterMovement)
+			{
+				character->CharacterMovement->GravityScale = g_pendingRestore.gravityScale;
+
+				if (character->CharacterMovement->MovementMode == SDK::EMovementMode::MOVE_None)
+				{
+					character->CharacterMovement->SetMovementMode(
+						SDK::EMovementMode::MOVE_Falling, 0);
+					settled = false;
+				}
+			}
+
+			if (settled)
+			{
+				LOG_INFO("Safeguard: restore settled after %d retries",
+				         kRestoreRetries - g_restoreRetries);
+				g_restoreRetries = 0;
+				return;
+			}
+		}
+		catch (...)
+		{
+			// Per-tick path. Say nothing, try again next tick.
+		}
+
+		if (--g_restoreRetries <= 0)
+		{
+			LOG_ERROR("Safeguard: gave up putting the body back at %.0f,%.0f,%.0f with a live "
+			          "movement mode. The player is probably stuck -- reloading a save will "
+			          "recover it.",
+			          g_pendingRestore.location.X, g_pendingRestore.location.Y,
+			          g_pendingRestore.location.Z);
+		}
 	}
 }

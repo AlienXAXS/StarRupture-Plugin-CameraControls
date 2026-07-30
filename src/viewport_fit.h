@@ -1,5 +1,24 @@
 #pragma once
 
+// IMPORTANT, measured in-game and not what this module was written believing:
+// writing ULocalPlayer::Origin/Size moves the rectangle the engine *projects*
+// into, but NOT the rectangle it *renders* into. The scene keeps filling the
+// whole window. The engine reported a 1459x820 view rect inside a 1920x1080
+// window while every world gizmo was still landing at its full-window position.
+//
+// So this module does not squeeze the picture, it only makes the engine's
+// projection think the picture is smaller. What the player sees as a fitted
+// viewer is `ui_editor`'s matte cropping a still-full-screen render, which means
+// playback shows MORE than the preview on all four sides -- the opposite of the
+// "what you frame is what you record" claim this started life with.
+//
+// Two consequences worth keeping straight:
+//   * `Rig::ProjectToScreen` has to rescale the engine's answer out of the
+//     projection rect and back into the window, or every handle sits up and to
+//     the left of the gizmo it belongs to.
+//   * The option's description says "crops", not "fits".
+
+
 // ---------------------------------------------------------------------------
 // Squeezes the game's 3D view into a sub-rectangle of the window, so the
 // editor panels sit *beside* the picture rather than on top of it.

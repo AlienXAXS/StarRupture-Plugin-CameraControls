@@ -50,7 +50,20 @@ namespace CameraControls::UI::Editor
 		float g_propertiesWidth = 380.0f;
 		float g_timelineHeight  = 260.0f;
 
-		ScreenRect g_gameRect;
+		// Two rectangles, and the difference between them is load-bearing.
+		//
+		// `g_requestedGameRect` is where we have *asked* the engine to draw. It
+		// drives state.gameView and the matte we paint around the picture.
+		//
+		// `g_actualGameRect` is where the engine is really drawing, which is the
+		// whole window whenever the squeeze did not take -- an unsupported build,
+		// a failed offset probe, or simply the frame before the game thread has
+		// applied it. Anything mapping world space onto the screen has to use this
+		// one. Projecting into a rect the engine is not honouring puts every
+		// handle up and to the left of the thing it is supposed to be on, by
+		// exactly the margin between the two.
+		ScreenRect g_requestedGameRect;
+		ScreenRect g_actualGameRect;
 
 		// Breathing room between the picture and the panels, so the frame edge
 		// reads as an edge rather than as the panel's border.
@@ -110,26 +123,38 @@ namespace CameraControls::UI::Editor
 			                     state.mode == Mode::Editor &&
 			                     !state.uiHidden;
 
+			const ScreenRect fullWindow{ 0.0f, 0.0f, screenW, screenH };
+
 			if (squeeze)
 			{
 				const float freeW = screenW - g_propertiesWidth - kViewerMargin * 2.0f;
 				const float freeH = screenH - g_timelineHeight  - kViewerMargin * 2.0f;
 
 				if (freeW > 200.0f && freeH > 150.0f)
-					g_gameRect = FitAspect(kViewerMargin, kViewerMargin, freeW, freeH, screenW / screenH);
+					g_requestedGameRect =
+						FitAspect(kViewerMargin, kViewerMargin, freeW, freeH, screenW / screenH);
 				else
-					g_gameRect = ScreenRect{ 0.0f, 0.0f, screenW, screenH };
+					g_requestedGameRect = fullWindow;
 			}
 			else
 			{
-				g_gameRect = ScreenRect{ 0.0f, 0.0f, screenW, screenH };
+				g_requestedGameRect = fullWindow;
 			}
 
-			state.gameView.x = g_gameRect.x / screenW;
-			state.gameView.y = g_gameRect.y / screenH;
-			state.gameView.w = g_gameRect.w / screenW;
-			state.gameView.h = g_gameRect.h / screenH;
+			// The engine only renders into the sub-rect once the game thread has
+			// pushed it into the local player and confirmed it took. Until then --
+			// and for good on a build where the probe refused -- the picture is
+			// still the whole window, and that is what has to be projected into.
+			g_actualGameRect = state.gameViewApplied ? g_requestedGameRect : fullWindow;
+
+			state.gameView.x = g_requestedGameRect.x / screenW;
+			state.gameView.y = g_requestedGameRect.y / screenH;
+			state.gameView.w = g_requestedGameRect.w / screenW;
+			state.gameView.h = g_requestedGameRect.h / screenH;
 			state.gameViewValid = true;
+
+			state.displayW = screenW;
+			state.displayH = screenH;
 		}
 
 		// Blacks out everything the game is no longer drawing into.
@@ -147,7 +172,7 @@ namespace CameraControls::UI::Editor
 			float screenW = 0.0f, screenH = 0.0f;
 			ui->GetDisplaySize(&screenW, &screenH);
 
-			const ScreenRect& r = g_gameRect;
+			const ScreenRect& r = g_requestedGameRect;
 			if (r.w <= 0.0f || r.h <= 0.0f)
 				return;
 
@@ -180,15 +205,23 @@ namespace CameraControls::UI::Editor
 
 			ui->BeginDisabled(!hasShot);
 
-			if (ui->ButtonSized("|<", w, h))
+			// Every transport button carries an explicit "##id" after its glyph.
+			//
+			// ImGui derives a widget's identity from its label, so two buttons
+			// labelled the same thing *are* the same widget -- ">" used to be both
+			// play and next-keyframe, and clicking one drove the other. Icons make
+			// that trap easier to fall into, not harder: rewind and forward are a
+			// mirrored pair and play/pause swaps its glyph on press, so identity has
+			// to come from the id rather than from what is drawn.
+			if (ui->ButtonSized(CC_ICON_SKIP_START "##transportStart", w, h))
 			{
 				state.playhead = 0.0;
 				state.playing  = false;
 			}
-			ui->SetItemTooltip("Jump to the start");
+			ItemTooltip(ui, "Jump to the start");
 
 			ui->SameLine(0.0f, 4.0f);
-			if (ui->ButtonSized("<", w, h))
+			if (ui->ButtonSized(CC_ICON_REWIND "##transportPrev", w, h))
 			{
 				// Step back to the previous keyframe boundary.
 				double target = 0.0;
@@ -199,20 +232,23 @@ namespace CameraControls::UI::Editor
 				}
 				state.playhead = target;
 			}
-			ui->SetItemTooltip("Previous keyframe");
+			ItemTooltip(ui, "Previous keyframe");
 
 			ui->SameLine(0.0f, 4.0f);
-			if (ToggleButton(ui, state.playing ? "||" : ">", state.playing, w, h))
+			if (ToggleButton(ui, state.playing ? CC_ICON_PAUSE "##transportPlay"
+			                                   : CC_ICON_PLAY  "##transportPlay",
+			                 state.playing, w, h))
 			{
 				state.playing = !state.playing;
 				if (state.playing && state.playhead >= total - 1e-6)
 					state.playhead = 0.0;
 			}
-			ui->SetItemTooltip("Preview play / pause. The camera follows the playhead "
-			                   "if 'Camera follows the playhead' is on.");
+			ItemTooltip(ui, "Preview play / pause.\n\n"
+			                "The camera follows the playhead if 'Camera follows the playhead' "
+			                "is on in the inspector.");
 
 			ui->SameLine(0.0f, 4.0f);
-			if (ui->ButtonSized(">", w, h))
+			if (ui->ButtonSized(CC_ICON_FORWARD "##transportNext", w, h))
 			{
 				double target = total;
 				for (int i = 0; i < timeline.Count(); ++i)
@@ -222,15 +258,15 @@ namespace CameraControls::UI::Editor
 				}
 				state.playhead = target;
 			}
-			ui->SetItemTooltip("Next keyframe");
+			ItemTooltip(ui, "Next keyframe");
 
 			ui->SameLine(0.0f, 4.0f);
-			if (ui->ButtonSized(">|", w, h))
+			if (ui->ButtonSized(CC_ICON_SKIP_END "##transportEnd", w, h))
 			{
 				state.playhead = total;
 				state.playing  = false;
 			}
-			ui->SetItemTooltip("Jump to the end");
+			ItemTooltip(ui, "Jump to the end");
 
 			ui->EndDisabled();
 
@@ -246,17 +282,19 @@ namespace CameraControls::UI::Editor
 
 			// --- Capture ------------------------------------------------------
 			ui->SameLine(0.0f, 18.0f);
-			if (AccentButton(ui, "Add keyframe", 130.0f, h))
+			if (AccentButton(ui, CC_ICON_ADD "##addkey", w, h))
 				Post(state, Request::CaptureAppend);
-			ui->SetItemTooltip("Records the free camera's current position, rotation and FOV "
-			                   "as a new keyframe at the end of the timeline.");
+			ItemTooltip(ui, "Add keyframe.\n\n"
+			                "Records the free camera's current position, rotation and FOV as a "
+			                "new keyframe at the end of the timeline.");
 
 			ui->SameLine(0.0f, 4.0f);
 			ui->BeginDisabled(state.selection == Selection::None || state.selectedId == 0);
-			if (ui->ButtonSized("Insert after", 110.0f, h))
+			if (ui->ButtonSized(CC_ICON_PLAYLIST_ADD "##insertkey", w, h))
 				Post(state, Request::CaptureInsertAfterSelected);
-			ui->SetItemTooltip("Splices a keyframe in after the selected one without changing "
-			                   "when any later keyframe happens.");
+			ItemTooltip(ui, "Insert after the selection.\n\n"
+			                "Splices a keyframe in after the selected one without changing when "
+			                "any later keyframe happens.");
 			ui->EndDisabled();
 
 			// --- Record --------------------------------------------------------
@@ -265,12 +303,38 @@ namespace CameraControls::UI::Editor
 			ui->PushStyleColor(Col_Button,        kDanger.r * 0.65f, kDanger.g * 0.65f, kDanger.b * 0.65f, 1.0f);
 			ui->PushStyleColor(Col_ButtonHovered, kDanger.r, kDanger.g, kDanger.b, 1.0f);
 			ui->PushStyleColor(Col_ButtonActive,  kDanger.r, kDanger.g, kDanger.b, 1.0f);
-			if (ui->ButtonSized("Playback mode", 130.0f, h))
+			if (ui->ButtonSized(CC_ICON_RECORD "##playbackmode", w, h))
 				Post(state, Request::StartPlayback);
 			ui->PopStyleColor(3);
-			ui->SetItemTooltip("Counts down, hides the editor (and optionally the game HUD), "
-			                   "then runs the timeline start to finish.");
+			ItemTooltip(ui, "Playback mode.\n\n"
+			                "Counts down, hides the editor (and optionally the game HUD), then "
+			                "runs the timeline start to finish.");
 			ui->EndDisabled();
+
+			// --- Ripple ---------------------------------------------------------
+			// On the bar rather than buried in the inspector because it changes what
+			// every drag on the track does -- it belongs where you can see its state
+			// while you are dragging, not two panels away. Unconditionally, too: the
+			// zoom cluster further right is skipped entirely on a narrow window, and
+			// a toggle that silently disappears is worse than no toggle.
+			//
+			// The glyph carries the state as well as the highlight does -- a whole
+			// chain link when later keyframes come along, a broken one when they do
+			// not -- so this reads correctly even at a glance.
+			ui->SameLine(0.0f, 18.0f);
+			if (ToggleButton(ui, state.options.rippleEdits ? CC_ICON_LINK     "##ripple"
+			                                               : CC_ICON_LINK_OFF "##ripple",
+			                 state.options.rippleEdits, w, h))
+				state.options.rippleEdits = !state.options.rippleEdits;
+			ItemTooltip(ui, state.options.rippleEdits
+				? "Ripple is ON.\n\n"
+				  "Retiming a keyframe moves every later keyframe with it, so the gaps you "
+				  "already set stay put.\n\n"
+				  "Click to turn off."
+				: "Ripple is OFF.\n\n"
+				  "Retiming a keyframe only changes that keyframe, stretching or squashing "
+				  "the segments either side of it.\n\n"
+				  "Click to turn on.");
 
 			// --- Nudge ----------------------------------------------------------
 			// Dragging on the track is fine for roughing timing out, but not for
@@ -308,7 +372,7 @@ namespace CameraControls::UI::Editor
 						char tip[96];
 						snprintf(tip, sizeof(tip), "Move this keyframe %+d frames (%+.2f s at %.0f fps)",
 						         frames, frames / std::max(timeline.frameRate, 1.0f), timeline.frameRate);
-						ui->SetTooltip(tip);
+						Tooltip(ui, tip);
 					}
 				}
 
@@ -320,30 +384,29 @@ namespace CameraControls::UI::Editor
 			ui->GetContentRegionAvail(&availX, &availY);
 
 			// Right-align the zoom cluster so it stays put as the middle grows.
-			const float clusterWidth = 34.0f * 3.0f + 8.0f + 90.0f;
+			//
+			// Ripple used to live here too, and this cluster is skipped entirely
+			// when the window is narrow -- so the one control that changes what
+			// every drag does was the first thing to vanish. It now sits on the
+			// transport bar instead, which is always drawn.
+			const float clusterWidth = 34.0f * 3.0f + 4.0f;
 			if (availX > clusterWidth + 20.0f)
 			{
 				ui->SameLine(0.0f, availX - clusterWidth);
 
-				if (ToggleButton(ui, "Ripple", state.options.rippleEdits, 90.0f, h))
-					state.options.rippleEdits = !state.options.rippleEdits;
-				ui->SetItemTooltip("On: dragging a keyframe pushes every later one along.\n"
-				                   "Off: only that keyframe moves; the next segment absorbs it.");
-
-				ui->SameLine(0.0f, 8.0f);
-				if (ui->ButtonSized("-", 34.0f, h))
+				if (ui->ButtonSized(CC_ICON_ZOOM_OUT "##zoomout", 34.0f, h))
 					g_view.pixelsPerSecond = Clamp(g_view.pixelsPerSecond / 1.4, 3.0, 1200.0);
-				ui->SetItemTooltip("Zoom out");
+				ItemTooltip(ui, "Zoom out");
 
 				ui->SameLine(0.0f, 2.0f);
-				if (ui->ButtonSized("+", 34.0f, h))
+				if (ui->ButtonSized(CC_ICON_ZOOM_IN "##zoomin", 34.0f, h))
 					g_view.pixelsPerSecond = Clamp(g_view.pixelsPerSecond * 1.4, 3.0, 1200.0);
-				ui->SetItemTooltip("Zoom in");
+				ItemTooltip(ui, "Zoom in");
 
 				ui->SameLine(0.0f, 2.0f);
-				if (ui->ButtonSized("Fit", 34.0f, h))
+				if (ui->ButtonSized(CC_ICON_FIT_SCREEN "##zoomfit", 34.0f, h))
 					g_view.pendingFit = true;
-				ui->SetItemTooltip("Frame the whole timeline");
+				ItemTooltip(ui, "Frame the whole timeline");
 			}
 
 			(void)now;
@@ -481,7 +544,11 @@ namespace CameraControls::UI::Editor
 
 	ScreenRect CurrentGameRect()
 	{
-		return g_gameRect;
+		// The rect the engine is actually drawing into, not the one we asked for.
+		// Both callers -- world-to-screen projection and the playback fade --
+		// need to line up with the picture on screen, and lining up with a
+		// request the engine ignored is worse than not squeezing at all.
+		return g_actualGameRect;
 	}
 
 	void ResetView()

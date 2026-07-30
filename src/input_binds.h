@@ -35,4 +35,22 @@ namespace CameraControls::Input
 	// Takes the already-locked State rather than locking itself, because every
 	// caller is a teardown path that is already holding the lock.
 	void ReleaseAllKeys(State& state);
+
+	// Logs which movement keys are *physically* down right now, at TRACE.
+	//
+	// This is the one piece of the input picture no snapshot of the engine can
+	// reach. While the modloader holds an exclusive token it drops every key
+	// message, releases included -- so a key that was already down when the token
+	// was taken never gets its release delivered to UE, and the game is left
+	// believing it is still held after we hand input back. The player experiences
+	// a character that walks off on its own or will not stop, which is easy to
+	// report as "I cannot control my character".
+	//
+	// UE's own latched key state is not readable from here, so instead both edges
+	// of token ownership record what the keyboard looked like. A key listed at
+	// acquire and not at release is the exact case above, and the pairing is what
+	// makes it identifiable rather than just suspicious.
+	//
+	// Safe from any thread and takes no locks -- it only reads the OS.
+	void LogPhysicalMovementKeys(const char* when);
 }

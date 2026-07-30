@@ -102,6 +102,12 @@
     <ClInclude Include="viewport_fit.h">
       <Filter>Game</Filter>
     </ClInclude>
+    <ClInclude Include="death_guard.h">
+      <Filter>Game</Filter>
+    </ClInclude>
+    <ClInclude Include="control_probe.h">
+      <Filter>Game</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(StarRuptureSDKSourceDir)Basic.cpp">
@@ -177,6 +183,12 @@
       <Filter>UI</Filter>
     </ClCompile>
     <ClCompile Include="viewport_fit.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="death_guard.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="control_probe.cpp">
       <Filter>Game</Filter>
     </ClCompile>
   </ItemGroup>

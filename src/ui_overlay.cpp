@@ -46,6 +46,7 @@ namespace CameraControls::UI::Overlay
 			{ RowKind::Bind,    "RollRight",       "C",           "roll right" },
 			{ RowKind::Bind,    "FovIn",           "R",           "zoom in" },
 			{ RowKind::Bind,    "FovOut",          "F",           "zoom out" },
+			{ RowKind::Bind,    "ResetRotation",   "X",           "level the camera" },
 
 			{ RowKind::Section, nullptr,           nullptr,       "KEYFRAMES" },
 			{ RowKind::Bind,    "CaptureKeyframe", "K",           "add at camera" },

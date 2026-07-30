@@ -52,6 +52,14 @@ namespace CameraControls::Vitals
 
 	bool IsActive() { return g_active; }
 
+	void Stop()
+	{
+		// Nothing to put back -- see the header. This only stops the flag claiming
+		// the attributes are being held when the tick has stopped holding them.
+		g_active   = false;
+		g_reported = false;
+	}
+
 	void ForgetWorldState()
 	{
 		g_active   = false;

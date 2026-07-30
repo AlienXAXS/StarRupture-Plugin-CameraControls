@@ -188,6 +188,8 @@
     <ClInclude Include="ui_overlay.h" />
     <ClInclude Include="ui_viewport.h" />
     <ClInclude Include="viewport_fit.h" />
+    <ClInclude Include="death_guard.h" />
+    <ClInclude Include="control_probe.h" />
   </ItemGroup>
   <ItemGroup>
     <!-- Game SDK sources — add more <Module>_functions.cpp entries as you use them -->
@@ -216,6 +218,8 @@
     <ClCompile Include="ui_overlay.cpp" />
     <ClCompile Include="ui_viewport.cpp" />
     <ClCompile Include="viewport_fit.cpp" />
+    <ClCompile Include="death_guard.cpp" />
+    <ClCompile Include="control_probe.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

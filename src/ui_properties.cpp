@@ -3,6 +3,7 @@
 #include "project_io.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -30,6 +31,37 @@ namespace CameraControls::UI::Properties
 		int                      g_selectedProject  = -1;
 		std::string              g_ioMessage;
 		bool                     g_ioMessageIsError = false;
+
+		// Width of the little [R] reset button that sits on the rotation row.
+		constexpr float kResetButtonWidth = 26.0f;
+
+		// Is the fly camera still sitting exactly on this keyframe's pose?
+		//
+		// The tolerances are tight rather than generous on purpose. GotoSelected
+		// copies the keyframe's pose into flyPose verbatim, so a camera that flew
+		// here and has not been touched matches to within float conversion. Fly
+		// even slightly and it stops matching, which is the intent: the moment the
+		// user is composing somewhere else, editing a keyframe must not drag their
+		// view back to it.
+		bool CameraIsOnKeyframe(const State& state, const Keyframe& key)
+		{
+			// Compare against the same *effective* rotation GotoSelected applies,
+			// not against key.rotation: for a look-at keyframe the camera is aimed
+			// at the target instead, so comparing the stored rotation would say
+			// "not here" for every look-at key and the live update would silently
+			// only work on half of them.
+			const Rot aim = key.lookAt ? LookAtRotation(key.location, key.lookAtTarget)
+			                           : key.rotation;
+
+			const Vec3   delta = state.flyPose.location - key.location;
+			const double drift = std::fabs(state.flyPose.rotation.pitch - aim.pitch) +
+			                     std::fabs(state.flyPose.rotation.yaw   - aim.yaw) +
+			                     std::fabs(state.flyPose.rotation.roll  - aim.roll);
+
+			return delta.Length() < 1.0 &&
+			       drift < 0.1 &&
+			       std::fabs(state.flyPose.fov - key.fov) < 0.1f;
+		}
 
 		void SyncKeyName(const Keyframe& key)
 		{
@@ -108,6 +140,18 @@ namespace CameraControls::UI::Properties
 			// --- Transform ----------------------------------------------------
 			ui->SeparatorText("Transform");
 
+			// Whether the fly camera is still parked on this keyframe's pose --
+			// i.e. the user flew to it (or just made it here) and has not moved
+			// since. Sampled *before* the edits below, because they are about to
+			// change what "this keyframe's pose" means.
+			//
+			// When it holds, every edit is fed back to the live camera so the
+			// viewport shows the change as it is dragged. When it does not, the
+			// user is composing somewhere else and yanking their camera to the
+			// keyframe would be the last thing they want.
+			const bool cameraOnKey = CameraIsOnKeyframe(state, key);
+			bool        poseEdited = false;
+
 			float location[3] = {
 				static_cast<float>(key.location.x),
 				static_cast<float>(key.location.y),
@@ -118,6 +162,7 @@ namespace CameraControls::UI::Properties
 			{
 				key.location = Vec3{ location[0], location[1], location[2] };
 				state.dirty  = true;
+				poseEdited   = true;
 			}
 			LabelRow(ui, "Location  X / Y / Z (cm)");
 
@@ -126,17 +171,34 @@ namespace CameraControls::UI::Properties
 				static_cast<float>(key.rotation.yaw),
 				static_cast<float>(key.rotation.roll)
 			};
-			FullWidthItem(ui);
+
+			// Room for the [R] on the same row, on top of the help gutter.
+			ui->SetNextItemWidth(-(HelpGutter(ui) + kResetButtonWidth + 4.0f));
 			if (ui->DragFloat3("##rot", rotation, 0.25f, -360.0f, 360.0f, "%.1f"))
 			{
 				key.rotation = Rot{ rotation[0], rotation[1], rotation[2] };
 				state.dirty  = true;
+				poseEdited   = true;
 			}
+
+			ui->SameLine(0.0f, 4.0f);
+			if (ui->ButtonSized(CC_ICON_RESET "##resetrot", kResetButtonWidth, 0.0f))
+			{
+				key.rotation = Rot{ 0.0, 0.0, 0.0 };
+				state.dirty  = true;
+				poseEdited   = true;
+			}
+			if (ui->IsItemHovered())
+				ui->SetTooltip("Reset pitch, yaw and roll to zero (level, facing world +X)");
+
 			LabelRow(ui, "Rotation  pitch / yaw / roll");
 
 			FullWidthItem(ui);
 			if (ui->SliderFloat("##fov", &key.fov, 5.0f, 170.0f, "FOV  %.1f deg"))
+			{
 				state.dirty = true;
+				poseEdited  = true;
+			}
 
 			ui->Spacing();
 
@@ -148,6 +210,7 @@ namespace CameraControls::UI::Properties
 			{
 				key.lookAt  = lookAt;
 				state.dirty = true;
+				poseEdited  = true;
 			}
 			HelpMarker(ui, "The camera aims at a fixed world point instead of using the "
 			               "stored rotation. Roll still comes from the rotation above.");
@@ -164,14 +227,25 @@ namespace CameraControls::UI::Properties
 				{
 					key.lookAtTarget = Vec3{ target[0], target[1], target[2] };
 					state.dirty      = true;
+					poseEdited       = true;
 				}
 				LabelRow(ui, "Target  X / Y / Z");
 
-				if (ui->Button("Aim target from camera"))
+				if (ui->Button(CC_ICON_FOCUS "  Aim from camera"))
 					Post(state, Request::LookAtSelectionFromCamera);
 				HelpMarker(ui, "Puts the target 10 m in front of wherever the fly camera "
 				               "is currently pointing.");
 			}
+
+			// Feed the edit back to the live camera, so the viewport tracks the
+			// drag instead of only showing it once you fly here again. One request
+			// per frame while a slider is held down, which is exactly the point.
+			//
+			// Placed after the Aim section so a look-at target counts as a pose
+			// edit too -- moving the target re-aims the camera just as surely as
+			// dragging the rotation does.
+			if (poseEdited && cameraOnKey)
+				Post(state, Request::GotoSelected);
 
 			ui->Spacing();
 
@@ -198,8 +272,9 @@ namespace CameraControls::UI::Properties
 			               "carries its speed straight through every keyframe in between.\n\n"
 			               "Every other curve flattens to zero slope at its ends, so putting "
 			               "one on both sides of a middle keyframe brings the camera to a "
-			               "dead stop as it passes through. That is worth doing deliberately "
-			               "to hold on a subject, and jarring by accident.");
+			               "dead stop as it passes through.\n\n"
+			               "That is worth doing deliberately to hold on a subject, and jarring "
+			               "by accident.");
 
 			if (key.easeIn == Ease::Auto || key.easeOut == Ease::Auto)
 			{
@@ -258,34 +333,43 @@ namespace CameraControls::UI::Properties
 			const float halfWidth = (availX - 6.0f) * 0.5f;
 			const float rowHeight = ui->GetFrameHeight() * 1.15f;
 
-			if (AccentButton(ui, "Fly camera here", halfWidth, rowHeight))
+			// Icon plus a word for these, not icon alone. They are half-panel-wide
+			// buttons in a dense inspector, and "fly to it" versus "overwrite it
+			// from the camera" is the pair most expensive to get wrong -- one of
+			// them destroys the pose you spent time on.
+			if (AccentButton(ui, CC_ICON_TARGET "  Fly here", halfWidth, rowHeight))
 				Post(state, Request::GotoSelected);
-			ui->SetItemTooltip("Moves the free camera to this keyframe's exact pose, so you can "
-			                   "carry on composing from it. Same as double-clicking it.");
+			ItemTooltip(ui, "Moves the free camera to this keyframe's exact pose, so you can "
+			                "carry on composing from it.\n\n"
+			                "Same as double-clicking the keyframe.");
 
 			ui->SameLine(0.0f, 6.0f);
 
-			if (AccentButton(ui, "Record from camera", halfWidth, rowHeight))
+			if (AccentButton(ui, CC_ICON_CAMERA "  Re-record", halfWidth, rowHeight))
 				Post(state, Request::UpdateSelectedFromCamera);
-			ui->SetItemTooltip("Overwrites this keyframe's position, rotation and FOV with "
-			                   "wherever the free camera is now.");
+			ItemTooltip(ui, "Overwrites this keyframe's position, rotation and FOV with wherever "
+			                "the free camera is now.\n\n"
+			                "The old pose is not recoverable, so fly somewhere you like first.");
 
-			if (ui->ButtonSized("Move earlier", halfWidth, rowHeight))
+			if (ui->ButtonSized(CC_ICON_EARLIER "  Earlier", halfWidth, rowHeight))
 			{
 				if (state.timeline.MoveEarlier(key.id))
 					state.dirty = true;
 			}
+			ItemTooltip(ui, "Swap this keyframe with the one before it, keeping the timing.");
+
 			ui->SameLine(0.0f, 6.0f);
-			if (ui->ButtonSized("Move later", halfWidth, rowHeight))
+			if (ui->ButtonSized(CC_ICON_LATER "  Later", halfWidth, rowHeight))
 			{
 				if (state.timeline.MoveLater(key.id))
 					state.dirty = true;
 			}
+			ItemTooltip(ui, "Swap this keyframe with the one after it, keeping the timing.");
 
 			ui->PushStyleColor(Col_Button,        kDanger.r * 0.6f, kDanger.g * 0.6f, kDanger.b * 0.6f, 1.0f);
 			ui->PushStyleColor(Col_ButtonHovered, kDanger.r, kDanger.g, kDanger.b, 1.0f);
 			ui->PushStyleColor(Col_ButtonActive,  kDanger.r, kDanger.g, kDanger.b, 1.0f);
-			if (ui->ButtonSized("Delete keyframe", availX, rowHeight))
+			if (ui->ButtonSized(CC_ICON_DELETE "  Delete keyframe", availX, rowHeight))
 			{
 				const uint32_t doomed = key.id;
 				state.selectedId = 0;
@@ -360,15 +444,17 @@ namespace CameraControls::UI::Properties
 			ui->GetContentRegionAvail(&availX, &availY);
 			const float rowHeight = ui->GetFrameHeight() * 1.15f;
 
-			if (AccentButton(ui, "Insert keyframe here from camera", availX, rowHeight))
+			if (AccentButton(ui, CC_ICON_PLAYLIST_ADD "  Insert here from camera",
+			                 availX, rowHeight))
 			{
 				state.selectedId = key.id;
 				Post(state, Request::CaptureInsertAfterSelected);
 			}
-			ui->SetItemTooltip("Splits this segment in two at the current camera pose, "
-			                   "without changing when any later keyframe happens.");
+			ItemTooltip(ui, "Splits this segment in two at the current camera pose, without "
+			                "changing when any later keyframe happens.");
 
-			if (ui->ButtonSized("Select the keyframe that starts it", availX, rowHeight))
+			if (ui->ButtonSized(CC_ICON_TARGET "  Select the keyframe that starts it",
+			                    availX, rowHeight))
 			{
 				state.selection  = Selection::Keyframe;
 				state.selectedId = key.id;
@@ -412,7 +498,7 @@ namespace CameraControls::UI::Properties
 			const float rowHeight = ui->GetFrameHeight() * 1.15f;
 			const float halfWidth = (availX - 6.0f) * 0.5f;
 
-			if (AccentButton(ui, "Save", halfWidth, rowHeight))
+			if (AccentButton(ui, CC_ICON_SAVE "  Save", halfWidth, rowHeight))
 			{
 				std::string error;
 				if (ProjectIO::Save(timeline.name, timeline, error))
@@ -432,7 +518,7 @@ namespace CameraControls::UI::Properties
 
 			ui->SameLine(0.0f, 6.0f);
 
-			if (ui->ButtonSized("New", halfWidth, rowHeight))
+			if (ui->ButtonSized(CC_ICON_NEW_FILE "  New", halfWidth, rowHeight))
 			{
 				timeline.Clear();
 				timeline.name       = "Untitled";
@@ -473,7 +559,7 @@ namespace CameraControls::UI::Properties
 
 			ui->BeginDisabled(!haveSelection);
 
-			if (ui->ButtonSized("Load", halfWidth, rowHeight))
+			if (ui->ButtonSized(CC_ICON_FOLDER_OPEN "  Load", halfWidth, rowHeight))
 			{
 				std::string error;
 				Timeline loaded;
@@ -500,7 +586,7 @@ namespace CameraControls::UI::Properties
 
 			ui->SameLine(0.0f, 6.0f);
 
-			if (ui->ButtonSized("Delete file", halfWidth, rowHeight))
+			if (ui->ButtonSized(CC_ICON_DELETE "  Delete file", halfWidth, rowHeight))
 				ui->OpenPopup("##confirmdelete", 0);
 
 			ui->EndDisabled();
@@ -511,7 +597,7 @@ namespace CameraControls::UI::Properties
 				if (haveSelection)
 					ui->TextDisabled(g_projectList[g_selectedProject].c_str());
 
-				if (ui->Button("Delete"))
+				if (ui->Button(CC_ICON_DELETE "  Delete"))
 				{
 					if (haveSelection)
 					{
@@ -532,7 +618,7 @@ namespace CameraControls::UI::Properties
 					ui->CloseCurrentPopup();
 				}
 				ui->SameLine(0.0f, 6.0f);
-				if (ui->Button("Cancel"))
+				if (ui->Button(CC_ICON_CANCEL "  Cancel"))
 					ui->CloseCurrentPopup();
 
 				ui->EndPopup();
@@ -559,6 +645,48 @@ namespace CameraControls::UI::Properties
 
 			if (ui->Checkbox("Loop", &timeline.loop))
 				state.dirty = true;
+
+			// Migration aid. New keyframes default to Auto, which flows through
+			// interior keys on its own -- but a project saved before Auto existed
+			// has an explicit curve on every key, and explicit curves mean a stop
+			// at every one of them. This is the one-click fix.
+			{
+				int explicitEases = 0;
+				for (const Keyframe& k : timeline.Keys())
+				{
+					if (k.easeIn != Ease::Auto)  ++explicitEases;
+					if (k.easeOut != Ease::Auto) ++explicitEases;
+				}
+
+				ui->BeginDisabled(explicitEases == 0);
+				if (ui->Button("Flow through every keyframe"))
+				{
+					for (Keyframe& k : timeline.Keys())
+					{
+						k.easeIn  = Ease::Auto;
+						k.easeOut = Ease::Auto;
+					}
+					state.dirty = true;
+					SetStatus(state, now, "All keyframes set to Auto easing");
+				}
+				ui->EndDisabled();
+
+				HelpMarker(ui, "Sets every keyframe's ease to Auto, so the camera eases away "
+				               "from the first and settles into the last, and carries its speed "
+				               "straight through everything in between.\n\n"
+				               "New keyframes are already Auto. This is for projects saved before "
+				               "Auto existed, which have an explicit curve on every keyframe.\n\n"
+				               "An explicit curve on both sides of a middle keyframe stops the "
+				               "camera dead as it passes through.");
+
+				if (explicitEases > 0)
+				{
+					char note[96];
+					snprintf(note, sizeof(note), "%d ease setting%s not on Auto",
+					         explicitEases, explicitEases == 1 ? "" : "s");
+					ui->TextDisabled(note);
+				}
+			}
 
 			FullWidthItem(ui);
 			if (ui->DragFloat("##framerate", &timeline.frameRate, 1.0f, 1.0f, 240.0f,
@@ -591,14 +719,19 @@ namespace CameraControls::UI::Properties
 			ui->SeparatorText("Editor");
 
 			ui->BeginDisabled(!state.gameViewSupported);
-			ui->Checkbox("Fit the game view beside the panels", &state.options.fitViewport);
+			ui->Checkbox("Mask the game view beside the panels", &state.options.fitViewport);
 			ui->EndDisabled();
-			HelpMarker(ui, "Squeezes the game's 3D view into the space the timeline and this "
+			HelpMarker(ui, "Frames the game's 3D view into the space the timeline and this "
 			               "inspector are not covering, the way an editing program frames its "
 			               "viewer -- so nothing you are composing is hidden behind a panel.\n\n"
-			               "The picture keeps the window's shape rather than the free area's, "
-			               "so the framing you see is exactly what a full-screen playback "
-			               "records. Playback always goes back to the whole window.");
+			               "It CROPS rather than scales.\n\n"
+			               "The engine keeps rendering the full "
+			               "window underneath: writing the player's viewport rectangle moves "
+			               "where the engine projects, not where it draws.\n\n"
+			               "So playback shows "
+			               "more than this preview does, on all four sides.\n\n"
+			               "Turn it off when the exact framing matters. The keyframe handles "
+			               "line up correctly either way.");
 
 			if (!state.gameViewSupported)
 				ui->TextDisabled("Unavailable: this game build lays its viewport out differently.");
@@ -646,44 +779,56 @@ namespace CameraControls::UI::Properties
 			ui->SliderFloat("##sensitivity", &state.options.mouseSensitivity, 0.02f, 1.5f,
 			                "Mouse sensitivity  %.2f");
 
-			ui->Checkbox("Projection self-test", &state.options.projectionDebug);
-			HelpMarker(ui, "Diagnostic. Draws a grey cross at the centre of the picture and a "
-			               "green ring where a point straight ahead of the camera projects to. "
-			               "They should sit exactly on top of each other at every angle.\n\n"
-			               "If they drift apart, the camera basis or the view rectangle is "
-			               "wrong. If they stay together but the keyframe handles are still "
-			               "misplaced, it is the field of view or the aspect ratio.");
+			ui->Checkbox("Projection readout", &state.options.projectionDebug);
+			HelpMarker(ui, "Diagnostic. Marks the centre of the picture and prints the rectangle "
+			               "the handles are being clipped to, the window size, whether the "
+			               "squeeze actually took, and how many keyframes the engine "
+			               "managed to project.\n\n"
+			               "The projection itself comes from the engine, so it cannot disagree "
+			               "with the in-world gizmos. What this checks is the frame around it.\n\n"
+			               "If "
+			               "'squeeze' reads off while the picture is clearly inset -- or on while "
+			               "it is not -- then handles are being clipped against the wrong "
+			               "rectangle and will vanish near the edges.");
 
 			ui->Spacing();
 
 			// --- Safety -----------------------------------------------------------
 			ui->SeparatorText("Player safety");
 
-			ui->Checkbox("Stash the player and carry them along", &state.options.protectPlayer);
-			HelpMarker(ui, "While the camera is detached your body is left standing in the open. "
-			               "This freezes it and tows it along under the camera -- which also "
-			               "keeps the world streaming in around the shot, since StarRupture "
-			               "streams around the player, not around the view. Everything is put "
-			               "back exactly as it was on exit.");
+			ui->Checkbox("Bury the player while filming", &state.options.protectPlayer);
+			HelpMarker(ui, "While the camera is detached your body is left standing in the open, "
+			               "still fully simulated.\n\n"
+			               "This freezes it, drops it far below the terrain "
+			               "and leaves it there for the session -- nothing can see it, walk into "
+			               "it or contain it down there.\n\n"
+			               "It does not follow the camera. Towing it along was what used to walk "
+			               "it through every radiation field and kill volume the shot flew "
+			               "through; the world streams from the view instead.\n\n"
+			               "Everything is put back exactly as it was on exit.");
 
 			ui->BeginDisabled(!state.options.protectPlayer);
 
 			FullWidthItem(ui);
-			ui->DragFloat("##followz", &state.options.followOffsetZ, 5.0f, -20000.0f, 20000.0f,
-			              "Height vs camera  %.0f");
-			HelpMarker(ui, "Negative keeps the body below the camera -- under the terrain when "
-			               "filming near the ground, and out of frame when filming from above. "
-			               "Positive puts it overhead instead.");
+			ui->DragFloat("##stashz", &state.options.stashAltitude, 25.0f, -200000.0f, 200000.0f,
+			              "Stash height  %.0f");
+			HelpMarker(ui, "The world height (Z) the body is dropped to, keeping the X and Y it "
+			               "was standing on.\n\n"
+			               "An absolute altitude, not a distance down: the same "
+			               "drop measured from a cliff top and from a canyon floor land nowhere "
+			               "near each other, and one number should mean one place.\n\n"
+			               "Lower it if your map has anything at this depth.");
 
-			ui->Checkbox("Also spawn a habitat shelter", &state.options.spawnHabitat);
-			HelpMarker(ui, "Experimental. Spawns a habitat building around the body, which then "
-			               "travels with it. It is a full building actor, so not every game build "
-			               "takes kindly to one appearing out of nowhere -- leave off if anything "
+			ui->Checkbox("Spawn a habitat shelter around them", &state.options.spawnHabitat);
+			HelpMarker(ui, "Gives the body a floor to stand on and four walls between it and the "
+			               "world.\n\n"
+			               "It is a full building actor, so not every game build takes "
+			               "kindly to one appearing out of nowhere -- turn it off if anything "
 			               "misbehaves.");
 
 			ui->Checkbox("Show a marker where the body is", &state.options.showPlayerMarker);
 			HelpMarker(ui, "Draws a person-sized box in the world at the stash point, so you can "
-			               "see it is keeping up.");
+			               "see where it ended up.");
 
 			ui->EndDisabled();
 
@@ -692,10 +837,36 @@ namespace CameraControls::UI::Properties
 
 			ui->Spacing();
 
+			ui->Checkbox("Make the player unkillable", &state.options.preventDeath);
+			HelpMarker(ui, "Switches off the two things that can kill the body outright rather "
+			               "than by draining a meter: the world's out-of-bounds kill (KillZ and "
+			               "the world bounds checks -- the \"went too low\" death).\n\n"
+			               "And the pawn's "
+			               "own damage flag, which is what pain volumes go through.\n\n"
+			               "Both are read before they are written and restored exactly as they "
+			               "were when you leave.\n\n"
+			               "Locking the meters below cannot do this job on its own: an instant "
+			               "kill happens inside one frame, and writing health back to full on the "
+			               "next tick does not undo it.");
+
+			ui->BeginDisabled(!state.options.preventDeath);
+			ui->Checkbox("Use the game's own Immortal cheat", &state.options.gameImmortality);
+			HelpMarker(ui, "Belt and braces, for damage the engine flags above cannot reach -- "
+			               "anything the game applies through its own ability system.\n\n"
+			               "This calls the game's `Immortal` cheat, which means asking the player "
+			               "controller to create the game's cheat manager.\n\n"
+			               "It stays instantiated "
+			               "for the rest of the session, so leave this off unless you are still "
+			               "dying with everything else on.");
+			ui->EndDisabled();
+
+			ui->Spacing();
+
 			ui->Checkbox("Lock health, food and water", &state.options.lockVitals);
 			HelpMarker(ui, "Holds health, food, water, oxygen, energy and shield at full, and "
 			               "the hazard meters (toxicity, radiation, heat, drain, corrosion, "
-			               "infection) at zero, for as long as the editor is open. Survival "
+			               "infection) at zero, for as long as the editor is open.\n\n"
+			               "Survival "
 			               "still ticks down while you compose a shot, and a long session "
 			               "will starve you otherwise.\n\n"
 			               "Temperature is left alone -- it is a comfortable band rather than "
@@ -713,8 +884,89 @@ namespace CameraControls::UI::Properties
 		g_ioMessage.clear();
 	}
 
+	namespace
+	{
+		// A clickable trail back out of a selection.
+		//
+		// The inspector is driven entirely by what the timeline has selected, so
+		// without this the only way back to the project settings is to find an
+		// empty stretch of track and click it -- which on a full timeline may
+		// not exist at all.
+		void RenderBreadcrumb(IModLoaderImGui* ui, State& state)
+		{
+			const int index = state.timeline.IndexOf(state.selectedId);
+
+			// Root crumb: always live, and always takes you home.
+			if (ui->Button("Project"))
+			{
+				state.selection  = Selection::None;
+				state.selectedId = 0;
+			}
+			ItemTooltip(ui, "Back to the project: name, length, save and load");
+
+			if (state.selection == Selection::None || index < 0)
+			{
+				ui->Separator();
+				return;
+			}
+
+			const Keyframe& key = state.timeline.Keys()[index];
+
+			char crumb[96];
+
+			// Middle crumb for a segment selection, so "clip 2 -> its keyframe"
+			// is one click each way rather than a hunt on the track.
+			if (state.selection == Selection::Segment)
+			{
+				ui->SameLine(0.0f, 6.0f);
+				ui->TextDisabled(">");
+				ui->SameLine(0.0f, 6.0f);
+
+				snprintf(crumb, sizeof(crumb), "Clip %d-%d", index + 1, index + 2);
+				ui->TextDisabled(crumb);
+
+				ui->SameLine(0.0f, 6.0f);
+				ui->TextDisabled(">");
+				ui->SameLine(0.0f, 6.0f);
+
+				snprintf(crumb, sizeof(crumb), "Keyframe %d", index + 1);
+				if (ui->Button(crumb))
+					state.selection = Selection::Keyframe;
+				ItemTooltip(ui, "Inspect the keyframe this clip leaves from");
+			}
+			else if (state.selection == Selection::Keyframe)
+			{
+				ui->SameLine(0.0f, 6.0f);
+				ui->TextDisabled(">");
+				ui->SameLine(0.0f, 6.0f);
+
+				// The clip is only a thing if there is something after this key
+				// for it to run to.
+				if (index + 1 < state.timeline.Count())
+				{
+					snprintf(crumb, sizeof(crumb), "Clip %d-%d", index + 1, index + 2);
+					if (ui->Button(crumb))
+						state.selection = Selection::Segment;
+					ItemTooltip(ui, "Inspect the timing of the clip leaving this keyframe");
+
+					ui->SameLine(0.0f, 6.0f);
+					ui->TextDisabled(">");
+					ui->SameLine(0.0f, 6.0f);
+				}
+
+				snprintf(crumb, sizeof(crumb), "Keyframe %d%s%s", index + 1,
+				         key.name.empty() ? "" : "  ", key.name.c_str());
+				ui->TextDisabled(crumb);
+			}
+
+			ui->Separator();
+		}
+	}
+
 	void Render(IModLoaderImGui* ui, State& state, double now)
 	{
+		RenderBreadcrumb(ui, state);
+
 		switch (state.selection)
 		{
 			case Selection::Keyframe:

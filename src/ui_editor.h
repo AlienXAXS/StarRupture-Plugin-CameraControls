@@ -34,5 +34,9 @@ namespace CameraControls::UI::Editor
 		float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
 	};
 
+	// Where the game's 3D view is *actually* being drawn this frame, in screen
+	// pixels. The whole window unless the viewport squeeze has taken effect --
+	// never the rect we merely asked for, because anything mapping world space
+	// onto the screen has to agree with the picture the player is looking at.
 	ScreenRect CurrentGameRect();
 }

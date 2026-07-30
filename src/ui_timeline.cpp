@@ -428,7 +428,7 @@ namespace CameraControls::UI::TimelineView
 			         k.name.c_str(),
 			         timeline.AbsoluteTime(hoveredIndex), k.fov,
 			         k.location.x, k.location.y, k.location.z);
-			ui->SetTooltip(tip);
+			Tooltip(ui, tip);
 		}
 	}
 }

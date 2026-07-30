@@ -82,6 +82,16 @@ namespace CameraControlsConfig
 		return s_self ? s_self->config->ReadBool(s_self, "Editor", "HideGameHud", true) : true;
 	}
 
+	bool Config::HudCollapseLayout()
+	{
+		return s_self ? s_self->config->ReadBool(s_self, "Editor", "HudCollapseLayout", true) : true;
+	}
+
+	bool Config::RestoreInputConfigs()
+	{
+		return s_self ? s_self->config->ReadBool(s_self, "Editor", "RestoreInputConfigs", true) : true;
+	}
+
 	bool Config::GizmosDuringPlayback()
 	{
 		return s_self ? s_self->config->ReadBool(s_self, "Editor", "GizmosDuringPlayback", false) : false;
@@ -99,12 +109,23 @@ namespace CameraControlsConfig
 
 	bool Config::SpawnHabitat()
 	{
-		return s_self ? s_self->config->ReadBool(s_self, "Safety", "SpawnHabitat", false) : false;
+		return s_self ? s_self->config->ReadBool(s_self, "Safety", "SpawnHabitat", true) : true;
 	}
 
-	float Config::FollowOffsetZ()
+	bool Config::PreventDeath()
 	{
-		return s_self ? s_self->config->ReadFloat(s_self, "Safety", "FollowOffsetZ", -400.0f) : -400.0f;
+		return s_self ? s_self->config->ReadBool(s_self, "Safety", "PreventDeath", true) : true;
+	}
+
+	bool Config::GameImmortality()
+	{
+		return s_self ? s_self->config->ReadBool(s_self, "Safety", "GameImmortality", false) : false;
+	}
+
+	float Config::StashAltitude()
+	{
+		return s_self ? s_self->config->ReadFloat(s_self, "Safety", "StashAltitude", -3500.0f)
+		              : -3500.0f;
 	}
 
 	bool Config::ShowPlayerMarker()

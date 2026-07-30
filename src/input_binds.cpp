@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <array>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -26,10 +27,10 @@ namespace CameraControls::Input
 		// -------------------------------------------------------------------
 		enum class Action
 		{
-			ToggleEditor, TogglePlayback, ToggleUI, ExitPlayback,
+			ToggleEditor, TogglePlayback, ToggleUI, ExitPlayback, DumpProbe,
 			FlyForward, FlyBack, FlyLeft, FlyRight, FlyDown, FlyUp,
 			FlyBoost, FlyCrawl,
-			RollLeft, RollRight, FovIn, FovOut,
+			RollLeft, RollRight, FovIn, FovOut, ResetRotation,
 			CaptureKeyframe, InsertKeyframe, UpdateKeyframe, GotoKeyframe,
 			DeleteKeyframe, PrevKeyframe, NextKeyframe, PlayPause,
 			Count
@@ -49,6 +50,18 @@ namespace CameraControls::Input
 			{ Action::ToggleUI,        "ToggleUI",        "F9",          false },
 			{ Action::ExitPlayback,    "ExitPlayback",    "Escape",      false },
 
+			// Diagnostic dump. Deliberately bound outside the editor's own keys
+			// because the whole point is to sample the world when the plugin is
+			// idle and the character will not respond -- at which point every
+			// editor key is inert by design.
+			//
+			// Home rather than the obvious F10: F10 is a Windows *system* key, so
+			// pressing it sends WM_SYSKEYDOWN and, unhandled, activates the window
+			// menu -- which steals focus and stops input reaching the game. For a
+			// key whose entire job is diagnosing input that has stopped reaching
+			// the game, that is the one thing it must not do.
+			{ Action::DumpProbe,       "DumpProbe",       "Home",        false },
+
 			{ Action::FlyForward,      "FlyForward",      "W",           true  },
 			{ Action::FlyBack,         "FlyBack",         "S",           true  },
 			{ Action::FlyLeft,         "FlyLeft",         "A",           true  },
@@ -61,6 +74,7 @@ namespace CameraControls::Input
 			{ Action::RollRight,       "RollRight",       "C",           true  },
 			{ Action::FovIn,           "FovIn",           "R",           true  },
 			{ Action::FovOut,          "FovOut",          "F",           true  },
+			{ Action::ResetRotation,   "ResetRotation",   "X",           false },
 
 			{ Action::CaptureKeyframe, "CaptureKeyframe", "K",           false },
 			{ Action::InsertKeyframe,  "InsertKeyframe",  "Shift+K",     false },
@@ -81,6 +95,43 @@ namespace CameraControls::Input
 		bool  g_looking     = false;   // right button held and the drag owns the camera
 		POINT g_lookAnchor  = {};      // screen position the cursor is pinned to
 		HWND  g_gameWindow  = nullptr;
+
+		// --- Modifier keys, sampled from the OS ------------------------------
+		//
+		// Boost and crawl default to LeftShift and LeftControl, and the modloader
+		// deliberately never dispatches a plain modifier keydown to a plugin:
+		// keybind_registry.cpp's ProcessWindowMessage resolves the sided VK
+		// correctly and then drops it, so that pressing Shift as part of a
+		// "Shift+K" combo cannot also fire a standalone Shift bind. The upshot is
+		// that a plain LeftShift bind can never fire, however it is registered.
+		//
+		// So these two are read straight from the keyboard instead. This file
+		// already owns OS-level input for the mouse-look drag, which makes it the
+		// right home, and it means boost/crawl work on any loader build rather
+		// than only on one carrying a fix. A bind pointed at a non-modifier key
+		// resolves to 0 here and goes back through the normal keybind path.
+		int g_boostVK = 0;
+		int g_crawlVK = 0;
+
+		// PumpModifierKeys runs every tick, so it may only log on a change.
+		bool g_lastBoost = false;
+		bool g_lastCrawl = false;
+
+		int ModifierVKForName(const std::string& name)
+		{
+			if (name == "LeftShift")    return VK_LSHIFT;
+			if (name == "RightShift")   return VK_RSHIFT;
+			if (name == "LeftControl")  return VK_LCONTROL;
+			if (name == "RightControl") return VK_RCONTROL;
+			if (name == "LeftAlt")      return VK_LMENU;
+			if (name == "RightAlt")     return VK_RMENU;
+			return 0;
+		}
+
+		bool KeyIsDown(int vk)
+		{
+			return vk != 0 && (GetAsyncKeyState(vk) & 0x8000) != 0;
+		}
 
 		HWND ResolveGameWindow()
 		{
@@ -154,6 +205,16 @@ namespace CameraControls::Input
 					Post(state, state.mode == Mode::Off ? Request::EnterEditor : Request::ExitEditor);
 					return;
 
+				// Works in every mode, including Off, because Off is exactly when
+				// it is needed: the symptom is a character that will not respond
+				// after the editor has closed.
+				case Action::DumpProbe:
+					LOG_TRACE("Input: control probe dump requested (mode %s)",
+					          state.mode == Mode::Off ? "Off"
+					        : state.mode == Mode::Editor ? "Editor" : "Playback");
+					Post(state, Request::DumpControlProbe);
+					return;
+
 				case Action::TogglePlayback:
 					if (state.mode == Mode::Playback)
 						Post(state, Request::StopPlayback);
@@ -170,6 +231,17 @@ namespace CameraControls::Input
 					{
 						LOG_TRACE("Input: escape out of playback");
 						Post(state, Request::StopPlayback);
+					}
+					else if (state.mode == Mode::Editor && state.selection != Selection::None)
+					{
+						// Escape as "step back out of what I am inspecting". The
+						// only other way back to the project settings is to find
+						// an empty stretch of track to click, which on a full
+						// timeline may not exist at all.
+						LOG_TRACE("Input: escape cleared the selection");
+						state.selection  = Selection::None;
+						state.selectedId = 0;
+						SetStatus(state, now, "Selection cleared");
 					}
 					return;
 
@@ -197,6 +269,21 @@ namespace CameraControls::Input
 				case Action::ToggleUI:
 					state.uiHidden = !state.uiHidden;
 					SetStatus(state, now, state.uiHidden ? "Editor UI hidden" : "Editor UI shown");
+					break;
+
+				// Levels the camera without moving it. Position is untouched on
+				// purpose -- the usual reason to want this is a shot that has
+				// drifted off-level from rolling, and re-framing from scratch
+				// because the level-out also teleported you would be worse than
+				// the tilt.
+				//
+				// flyPose.rotation is the fly camera's only rotation state (see
+				// fly_controls, which integrates deltas straight into it), so
+				// zeroing it here is the whole job -- the tick writes it onto the
+				// camera actor on its way past.
+				case Action::ResetRotation:
+					state.flyPose.rotation = Rot{ 0.0, 0.0, 0.0 };
+					SetStatus(state, now, "Camera rotation reset");
 					break;
 
 				case Action::CaptureKeyframe:
@@ -309,13 +396,85 @@ namespace CameraControls::Input
 		// inside the engine tick, which already holds it. Taking it again on
 		// the same thread is undefined behaviour, and it used to throw out of
 		// ExitEditor before the camera and the player had been restored.
+
+		// What was still down when the editor closed, before it is cleared.
+		//
+		// Worth a line even when the answer is "nothing", because the interesting
+		// case is a key we were holding at the moment the modloader stopped
+		// swallowing input: the game never saw our press, so it will never see the
+		// matching release, and from the player's chair a latched movement key is
+		// hard to tell apart from a character that will not respond.
+		int stillHeld = 0;
+		for (int i = 0; i < static_cast<int>(Action::Count); ++i)
+			if (g_held[i]) ++stillHeld;
+
+		if (stillHeld > 0)
+		{
+			char list[256] = {};
+			int  used = 0;
+			for (int i = 0; i < kBindCount && used < static_cast<int>(sizeof(list)) - 24; ++i)
+			{
+				if (!g_held[static_cast<int>(kBinds[i].action)])
+					continue;
+
+				used += snprintf(list + used, sizeof(list) - used, "%s%s",
+				                 used > 0 ? "," : "", kBinds[i].configKey);
+			}
+			LOG_TRACE("Input: releasing %d still-held key(s): %s", stillHeld, list);
+		}
+		else
+		{
+			LOG_TRACE("Input: no keys were still held at teardown");
+		}
+
 		for (bool& held : g_held)
 			held = false;
 
 		g_looking    = false;
 		g_lookAnchor = POINT{};
+		g_lastBoost  = false;
+		g_lastCrawl  = false;
 
 		state.flyInput.ClearAll();
+	}
+
+	void LogPhysicalMovementKeys(const char* when)
+	{
+		// The keys the game moves on, plus the ones it acts on. Hard-coded rather
+		// than read from the game's bindings because this is about what the OS
+		// sees, and the game's own mapping is not reachable from here anyway.
+		struct Probe { int vk; const char* name; };
+		static const Probe kProbes[] = {
+			{ 'W', "W" }, { 'A', "A" }, { 'S', "S" }, { 'D', "D" },
+			{ VK_SPACE,   "Space"    },
+			{ VK_LSHIFT,  "LShift"   },
+			{ VK_LCONTROL,"LCtrl"    },
+			{ VK_LBUTTON, "LMouse"   },
+			{ VK_RBUTTON, "RMouse"   },
+		};
+
+		char list[128] = {};
+		int  used  = 0;
+		int  count = 0;
+
+		for (const Probe& probe : kProbes)
+		{
+			if (!KeyIsDown(probe.vk))
+				continue;
+
+			++count;
+			const int remaining = static_cast<int>(sizeof(list)) - used;
+			const int written = snprintf(list + used, remaining, "%s%s",
+			                             used > 0 ? "," : "", probe.name);
+			if (written < 0 || written >= remaining)
+				break;
+			used += written;
+		}
+
+		if (count > 0)
+			LOG_TRACE("Input: physically down at %s: %s", when, list);
+		else
+			LOG_TRACE("Input: nothing physically down at %s", when);
 	}
 
 	void Register(IPluginSelf* self)
@@ -334,8 +493,24 @@ namespace CameraControls::Input
 			g_resolvedNames[i] = CameraControlsConfig::Config::GetKeybind(
 				kBinds[i].configKey, kBinds[i].fallback, buffer, sizeof(buffer));
 
-			LOG_DEBUG("Input: '%s' -> %s%s", g_resolvedNames[i].c_str(), kBinds[i].configKey,
-			          kBinds[i].wantsRelease ? " (held)" : "");
+			// Boost and crawl get polled from the OS instead of dispatched, if
+			// they are still pointed at a modifier key. Recorded here, where the
+			// resolved name is, and logged so the log says which path a given
+			// bind is actually taking.
+			const int modifierVK = ModifierVKForName(g_resolvedNames[i]);
+			if (modifierVK != 0)
+			{
+				if (kBinds[i].action == Action::FlyBoost) g_boostVK = modifierVK;
+				if (kBinds[i].action == Action::FlyCrawl) g_crawlVK = modifierVK;
+			}
+
+			const bool polled = modifierVK != 0 &&
+			                    (kBinds[i].action == Action::FlyBoost ||
+			                     kBinds[i].action == Action::FlyCrawl);
+
+			LOG_DEBUG("Input: '%s' -> %s%s%s", g_resolvedNames[i].c_str(), kBinds[i].configKey,
+			          kBinds[i].wantsRelease ? " (held)" : "",
+			          polled ? " (polled -- the loader does not dispatch bare modifiers)" : "");
 
 			input->RegisterKeybindByName(g_resolvedNames[i].c_str(),
 			                             EModKeyEvent::Pressed, g_callbacks[i]);
@@ -382,8 +557,44 @@ namespace CameraControls::Input
 		input->UnregisterKeybind(EModKey::RightMouseButton, EModKeyEvent::Released, &OnLookButton);
 	}
 
+	void PumpModifierKeys()
+	{
+		if (g_boostVK == 0 && g_crawlVK == 0)
+			return;
+
+		const bool boost = KeyIsDown(g_boostVK);
+		const bool crawl = KeyIsDown(g_crawlVK);
+
+		// Edge-triggered: this runs 60 times a second and the user asked to see
+		// these in the log, which only works if they are not also the loudest
+		// thing in it.
+		if (boost != g_lastBoost)
+		{
+			g_lastBoost = boost;
+			LOG_TRACE("Input: boost (vk 0x%02X) %s", g_boostVK, boost ? "down" : "up");
+		}
+		if (crawl != g_lastCrawl)
+		{
+			g_lastCrawl = crawl;
+			LOG_TRACE("Input: crawl (vk 0x%02X) %s", g_crawlVK, crawl ? "down" : "up");
+		}
+
+		auto lock = Lock();
+		State& state = Get();
+
+		if (state.mode != Mode::Editor)
+			return;
+
+		g_held[static_cast<int>(Action::FlyBoost)] = boost;
+		g_held[static_cast<int>(Action::FlyCrawl)] = crawl;
+		RecomputeAxes(state);
+	}
+
 	void PumpMouseLook()
 	{
+		// Same thread, same place in the tick, and it takes the lock the same way.
+		PumpModifierKeys();
+
 		float sensitivity = 0.25f;
 		bool  wantLook    = false;
 

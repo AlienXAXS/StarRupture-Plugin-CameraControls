@@ -34,6 +34,8 @@ namespace CameraControlsConfig
 		{ "Keybinds", "RollRight",  ConfigValueType::Keybind, "C", "Roll the camera clockwise" },
 		{ "Keybinds", "FovIn",      ConfigValueType::Keybind, "R", "Narrow the field of view" },
 		{ "Keybinds", "FovOut",     ConfigValueType::Keybind, "F", "Widen the field of view" },
+		{ "Keybinds", "ResetRotation", ConfigValueType::Keybind, "X",
+		  "Level the camera -- pitch, yaw and roll to zero -- without moving it" },
 
 		// --- Editing ---------------------------------------------------------
 		{ "Keybinds", "CaptureKeyframe", ConfigValueType::Keybind, "K",
@@ -62,9 +64,11 @@ namespace CameraControlsConfig
 		  "Pre-roll countdown shown before playback starts", 0.0f, 10.0f },
 
 		{ "Editor", "FitViewport", ConfigValueType::Boolean, "true",
-		  "Shrink the game's 3D view into the area the timeline and inspector are "
-		  "not covering, like an editing program's viewer. The picture keeps the "
-		  "window's shape, so what you frame is what a full-screen playback records." },
+		  "Mask the game's 3D view down to the area the timeline and inspector are "
+		  "not covering, like an editing program's viewer. NOTE: this crops the "
+		  "picture rather than scaling it -- the engine goes on rendering the full "
+		  "window underneath, so playback will show MORE than the preview does. "
+		  "Turn it off when the exact framing matters." },
 		{ "Editor", "ShowGizmos", ConfigValueType::Boolean, "true",
 		  "Draw the camera path and keyframes in the 3D world" },
 		{ "Editor", "SplineSamples", ConfigValueType::Integer, "16",
@@ -79,6 +83,19 @@ namespace CameraControlsConfig
 		  "Hide the game's own interface for as long as the editor camera is flying, "
 		  "not just during a take. This is the same switch the game's own cinematic-mode "
 		  "key uses, so it is put back exactly as it was on the way out." },
+		{ "Editor", "HudCollapseLayout", ConfigValueType::Boolean, "true",
+		  "When hiding the game's interface, also collapse its main UMG layout widget as a "
+		  "second pass. Turn this OFF if your character stops responding to movement after "
+		  "leaving the editor: the layout is a CommonUI widget, and collapsing it may "
+		  "deactivate it and take the game's input mappings with it, which restoring the "
+		  "visibility does not undo. With this off, hiding the HUD uses only the same flag "
+		  "the game's own cinematic-mode key does." },
+		{ "Editor", "RestoreInputConfigs", ConfigValueType::Boolean, "true",
+		  "On leaving the editor, re-bind the game's player input configs so your keys come "
+		  "back. Taking the camera off the player pawn makes the game strip the pawn's key "
+		  "mappings -- 73 drop to 11, leaving only menu and cheat keys -- and it never puts "
+		  "them back, which is why the character used to stop responding to WASD. Leave this "
+		  "on unless it misbehaves; with it off the log still reports what it would have done." },
 		{ "Editor", "GizmosDuringPlayback", ConfigValueType::Boolean, "false",
 		  "Keep drawing the path gizmos while the timeline is playing" },
 		{ "Editor", "PassthroughInput", ConfigValueType::Boolean, "false",
@@ -87,13 +104,24 @@ namespace CameraControlsConfig
 
 		{ "Safety", "ProtectPlayer", ConfigValueType::Boolean, "true",
 		  "Move the player somewhere safe and hold them still while the camera is detached" },
-		{ "Safety", "SpawnHabitat", ConfigValueType::Boolean, "false",
-		  "Also spawn a habitat shelter around the stashed player. Experimental -- "
-		  "this spawns a full building actor, which not every game build likes." },
-		{ "Safety", "FollowOffsetZ", ConfigValueType::Float, "-400",
-		  "Height of the stashed player relative to the camera, in Unreal units. "
-		  "Negative keeps them below it. They ride along with the camera so the "
-		  "world keeps streaming in around the shot.", -20000.0f, 20000.0f },
+		{ "Safety", "SpawnHabitat", ConfigValueType::Boolean, "true",
+		  "Spawn a habitat shelter around the stashed player, so they have a floor "
+		  "to stand on and four walls between them and the world. This spawns a "
+		  "full building actor, which not every game build likes -- turn it off if "
+		  "anything misbehaves." },
+		{ "Safety", "PreventDeath", ConfigValueType::Boolean, "true",
+		  "Switch off the world's out-of-bounds kill (KillZ and world bounds "
+		  "checks) and the player's damage flag for as long as the editor is "
+		  "open. Everything is restored exactly as it was on the way out." },
+		{ "Safety", "GameImmortality", ConfigValueType::Boolean, "false",
+		  "Also turn on the game's own Immortal cheat while the editor is open. "
+		  "This covers damage the engine flags cannot -- but it makes the player "
+		  "controller create the game's cheat manager, so the session runs with "
+		  "cheats instantiated. Off unless you need it." },
+		{ "Safety", "StashAltitude", ConfigValueType::Float, "-3500",
+		  "World height (Z) the stashed player is dropped to, keeping the X and Y "
+		  "they were standing on. This is an absolute altitude, not a drop -- well "
+		  "below any terrain, where nothing can reach them.", -200000.0f, 200000.0f },
 		{ "Safety", "ShowPlayerMarker", ConfigValueType::Boolean, "true",
 		  "Draw a marker in the world where the stashed player is" },
 		{ "Safety", "LockVitals", ConfigValueType::Boolean, "true",
@@ -130,12 +158,16 @@ namespace CameraControlsConfig
 		static float GizmoScale();
 		static float GizmoNearCull();
 		static bool  HideGameHud();
+		static bool  HudCollapseLayout();
+		static bool  RestoreInputConfigs();
 		static bool  GizmosDuringPlayback();
 		static bool  PassthroughInput();
 
 		static bool  ProtectPlayer();
 		static bool  SpawnHabitat();
-		static float FollowOffsetZ();
+		static bool  PreventDeath();
+		static bool  GameImmortality();
+		static float StashAltitude();
 		static bool  ShowPlayerMarker();
 		static bool  LockVitals();
 

@@ -39,6 +39,28 @@ namespace CameraControls::Theme
 		return clicked;
 	}
 
+	void Tooltip(IModLoaderImGui* ui, const char* text)
+	{
+		if (!ui->BeginTooltip())
+			return;
+
+		// Font-relative rather than a pixel constant: the modloader lets the user
+		// scale the UI font, and a fixed 340px that reads well at 100% is a narrow
+		// column of two-word lines at 150%. Roughly 42 characters of body text,
+		// which is about where a tooltip stops being comfortable to read.
+		ui->PushTextWrapPos(ui->GetFontSize() * 24.0f);
+		ui->TextWrapped(text);
+		ui->PopTextWrapPos();
+
+		ui->EndTooltip();
+	}
+
+	void ItemTooltip(IModLoaderImGui* ui, const char* text)
+	{
+		if (ui->IsItemHovered())
+			Tooltip(ui, text);
+	}
+
 	float HelpGutter(IModLoaderImGui* ui)
 	{
 		float w = 0.0f, h = 0.0f;
@@ -74,8 +96,7 @@ namespace CameraControls::Theme
 		ui->SetCursorPosX(ui->GetCursorPosX() + availX - markerW);
 
 		ui->TextDisabled("(?)");
-		if (ui->IsItemHovered())
-			ui->SetTooltip(text);
+		ItemTooltip(ui, text);
 	}
 
 	void FormatTime(double seconds, char* buffer, int bufferSize)

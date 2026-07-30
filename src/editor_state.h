@@ -47,6 +47,12 @@ namespace CameraControls
 		GotoSelected,              // fly camera jumps to the selected key
 		SnapCameraToPlayhead,      // fly camera jumps to the evaluated pose
 		LookAtSelectionFromCamera, // set the selected key's look-at to the camera's aim
+
+		// Log a full control_probe snapshot. Queued rather than done in the
+		// keybind callback because the probe reads UObjects and keybinds arrive on
+		// the modloader's WndProc thread. Handled before the tick's mode gate, so
+		// it works while the plugin is idle -- which is the only time it is useful.
+		DumpControlProbe,
 	};
 
 	// Which timeline element the property panel is inspecting.
@@ -91,6 +97,22 @@ namespace CameraControls
 		float x = 0.0f, y = 0.0f, w = 1.0f, h = 1.0f;
 	};
 
+	// Where a keyframe's world position lands on screen, projected by the engine
+	// on the game thread for the render thread to draw handles at.
+	//
+	// This crosses the thread boundary as plain numbers precisely because the
+	// projection cannot: it needs the player controller, and the render thread may
+	// not touch one. Keyed by keyframe id rather than index, because the UI can
+	// add or delete a keyframe between the tick that filled this in and the frame
+	// that draws it -- and an index would then label the wrong handle.
+	struct KeyScreen
+	{
+		uint32_t id       = 0;
+		float    x        = 0.0f;
+		float    y        = 0.0f;
+		double   distance = 0.0;   // camera to keyframe, for handle sizing
+	};
+
 	struct Options
 	{
 		bool  fitViewport          = true;   // shrink the game view out from under the panels
@@ -102,7 +124,22 @@ namespace CameraControls
 		// a shot just as much as it is in the way of recording one.
 		bool  hideGameHud          = true;
 		bool  protectPlayer        = true;   // stash the body somewhere safe
-		bool  spawnHabitat         = false;  // ...inside a spawned habitat shelter
+		bool  spawnHabitat         = true;   // ...inside a spawned habitat shelter
+
+		// World Z the body is dropped to, keeping its X and Y. Absolute, not a
+		// drop from where the player stands -- see player_safeguard.h. Well below
+		// any terrain, where nothing can see it and no volume contains it.
+		float stashAltitude        = -3500.0f;
+
+		// Switch off the world's out-of-bounds kill and the pawn's damage flag
+		// for as long as the editor is open. See death_guard.
+		bool  preventDeath         = true;
+
+		// Additionally turn on the game's own Immortal cheat. Off by default:
+		// it works, but it leaves the session running with the game's cheat
+		// manager instantiated, which is not a side effect to inflict on
+		// somebody who only asked to fly a camera.
+		bool  gameImmortality      = false;
 		bool  rippleEdits          = true;   // dragging a key pushes later keys
 		bool  scrubPreview         = true;   // camera follows the playhead
 		float countdownSeconds     = 3.0f;   // pre-roll before playback starts
@@ -112,12 +149,6 @@ namespace CameraControls
 		float gizmoScale           = 3.0f;   // keyframe camera icon size multiplier
 		float gizmoNearCull        = 150.0f; // hide gizmo lines closer than this to the camera
 
-		// Where the stashed player rides relative to the camera, in Unreal
-		// units. Negative Z keeps them below it -- under the terrain when
-		// filming near the ground, and out of frame when filming from the air.
-		float followOffsetX        = 0.0f;
-		float followOffsetY        = 0.0f;
-		float followOffsetZ        = -400.0f;
 		bool  showPlayerMarker     = true;   // draw a box where the body is
 		bool  lockVitals           = true;   // pin health/food/water while editing
 
@@ -163,6 +194,13 @@ namespace CameraControls
 		CameraPose renderView;
 		bool       renderViewValid = false;
 
+		// Engine-projected screen positions for every keyframe that is currently
+		// in front of the camera. Refilled from scratch every editor tick, so a
+		// keyframe missing from here is one the engine declined to project --
+		// behind the camera, or no projection data yet. The UI draws nothing for
+		// those rather than guessing.
+		std::vector<KeyScreen> keyScreen;
+
 		FlyInput flyInput;
 		Options  options;
 
@@ -202,6 +240,13 @@ namespace CameraControls
 		// inspector can grey the option out instead of offering something that
 		// will never do anything.
 		bool gameViewSupported = true;
+
+		// ImGui's display size in pixels, so the game thread can report the game
+		// view rect in the same units the render thread laid it out in. Only the
+		// render thread knows this, and only the game thread can ask the engine
+		// what rect it is really using -- comparing the two needs both here.
+		float displayW = 0.0f;
+		float displayH = 0.0f;
 
 		// Project bookkeeping.
 		std::string projectName = "Untitled";

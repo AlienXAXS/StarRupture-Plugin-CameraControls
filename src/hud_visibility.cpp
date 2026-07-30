@@ -1,4 +1,5 @@
 #include "hud_visibility.h"
+#include "plugin_config.h"
 #include "plugin_helpers.h"
 
 #include "Engine_classes.hpp"
@@ -133,23 +134,45 @@ namespace CameraControls::Hud
 		}
 
 		// --- Anything the HUD actor does not own --------------------------
-		try
+		//
+		// Under suspicion, hence the switch. `WBP_OverallUILayout_C` is a CommonUI
+		// widget, and collapsing a CommonUI activatable widget can deactivate it --
+		// which removes the Enhanced Input mapping contexts it brought with it.
+		// Restoring the visibility does not re-activate it, so those mappings would
+		// never come back, and a player with no mappings cannot move while every
+		// gameplay flag still reads perfectly healthy. That is exactly the symptom
+		// being chased, and the measured 73 -> 11 drop in
+		// `UEnhancedPlayerInput::EnhancedActionMappings` across an editor session is
+		// consistent with it.
+		//
+		// Off makes the HUD hide rely on `bShowHUD` alone, which is what the game's
+		// own F1 handler does and is therefore known not to break anything.
+		// Defaulted on only so behaviour does not change under anyone silently; if
+		// the suspicion is confirmed this should become the default, or go.
+		if (!CameraControlsConfig::Config::HudCollapseLayout())
 		{
-			g_layout = FindLayoutWidget();
-			if (g_layout)
-			{
-				g_previous = g_layout->GetVisibility();
-				g_layout->SetVisibility(SDK::ESlateVisibility::Collapsed);
-				anything = true;
-
-				LOG_DEBUG("Hud: layout visibility %d -> Collapsed",
-				          static_cast<int>(g_previous));
-			}
+			LOG_DEBUG("Hud: layout collapse disabled by config -- bShowHUD only");
 		}
-		catch (...)
+		else
 		{
-			LOG_WARN("Hud: collapsing the layout widget threw");
-			g_layout = nullptr;
+			try
+			{
+				g_layout = FindLayoutWidget();
+				if (g_layout)
+				{
+					g_previous = g_layout->GetVisibility();
+					g_layout->SetVisibility(SDK::ESlateVisibility::Collapsed);
+					anything = true;
+
+					LOG_DEBUG("Hud: layout visibility %d -> Collapsed",
+					          static_cast<int>(g_previous));
+				}
+			}
+			catch (...)
+			{
+				LOG_WARN("Hud: collapsing the layout widget threw");
+				g_layout = nullptr;
+			}
 		}
 
 		g_hidden = anything;

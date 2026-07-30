@@ -89,6 +89,49 @@ namespace CameraControls::Theme
 		Column_WidthFixed   = 1 << 4,
 	};
 
+	// --- Icons ------------------------------------------------------------
+	//
+	// Material Icons glyphs, from the font the modloader merges into the shared
+	// ImGui atlas. Nothing has to be registered to use them: ImGui 1.92 bakes
+	// glyphs on demand and the modloader's DX12 backend supports that, so
+	// `GlyphRanges` over in `imgui_backend.cpp` is only a preload hint. Any of the
+	// font's 2188 glyphs works from here.
+	//
+	// Macros rather than constants on purpose: every one of these is concatenated
+	// with an "##id" suffix at the call site, and only string *literals* can be
+	// concatenated at compile time. See the ImGui identity rule in CLAUDE.md for
+	// why the suffix is not optional.
+	//
+	// The font's `post` table is version 3.0 and stores no glyph names, so a wrong
+	// codepoint is an invisible button rather than a compile error. Every value
+	// below was verified by eye against the contact sheets in the modloader's
+	// MaterialIcons.md -- check there, not memory, before adding one.
+	#define CC_ICON_SKIP_START  "\xEE\x81\x85"   // U+E045 skip_previous
+	#define CC_ICON_REWIND      "\xEE\x80\xA0"   // U+E020 fast_rewind
+	#define CC_ICON_PLAY        "\xEE\x80\xB7"   // U+E037 play_arrow
+	#define CC_ICON_PAUSE       "\xEE\x80\xB4"   // U+E034 pause
+	#define CC_ICON_FORWARD     "\xEE\x80\x9F"   // U+E01F fast_forward
+	#define CC_ICON_SKIP_END    "\xEE\x81\x84"   // U+E044 skip_next
+	#define CC_ICON_RECORD      "\xEE\x81\xA1"   // U+E061 fiber_manual_record
+	#define CC_ICON_LINK        "\xEE\x85\x97"   // U+E157 link
+	#define CC_ICON_LINK_OFF    "\xEE\x85\xAF"   // U+E16F link_off
+	#define CC_ICON_ADD         "\xEE\x85\x85"   // U+E145 add
+	#define CC_ICON_PLAYLIST_ADD "\xEE\x80\xBB"  // U+E03B playlist_add
+	#define CC_ICON_ZOOM_IN     "\xEE\xA3\xBF"   // U+E8FF zoom_in
+	#define CC_ICON_ZOOM_OUT    "\xEE\xA4\x80"   // U+E900 zoom_out
+	#define CC_ICON_FIT_SCREEN  "\xEE\xA8\x90"   // U+EA10 fit_screen
+	#define CC_ICON_RESET       "\xEE\x97\x95"   // U+E5D5 refresh
+	#define CC_ICON_SAVE        "\xEE\x85\xA1"   // U+E161 save
+	#define CC_ICON_FOLDER_OPEN "\xEE\x8B\x88"   // U+E2C8 folder_open
+	#define CC_ICON_NEW_FILE    "\xEE\xA2\x9C"   // U+E89C note_add
+	#define CC_ICON_DELETE      "\xEE\xA1\xB2"   // U+E872 delete
+	#define CC_ICON_TARGET      "\xEE\x86\xB3"   // U+E1B3 gps_fixed
+	#define CC_ICON_CAMERA      "\xEE\x90\x92"   // U+E412 photo_camera
+	#define CC_ICON_FOCUS       "\xEE\x8E\xB4"   // U+E3B4 center_focus_strong
+	#define CC_ICON_EARLIER     "\xEE\x97\x84"   // U+E5C4 arrow_back
+	#define CC_ICON_LATER       "\xEE\x97\x88"   // U+E5C8 arrow_forward
+	#define CC_ICON_CANCEL      "\xEE\x97\x8D"   // U+E5CD close
+
 	// --- Palette ----------------------------------------------------------
 	struct Rgba { float r, g, b, a; };
 
@@ -120,6 +163,20 @@ namespace CameraControls::Theme
 	void TextColored(IModLoaderImGui* ui, const Rgba& c, const char* text);
 	bool AccentButton(IModLoaderImGui* ui, const char* label, float width, float height);
 	bool ToggleButton(IModLoaderImGui* ui, const char* label, bool active, float width, float height);
+
+	// Tooltips that wrap.
+	//
+	// SetTooltip and SetItemTooltip do not: ImGui auto-sizes the tooltip window to
+	// the longest line, so a two-sentence explanation becomes a tooltip wider than
+	// the screen. Wrapping at a font-relative width fixes every tooltip at once,
+	// and it changes what the "\n\n" breaks in the strings are *for* -- they now
+	// separate ideas rather than manually holding lines to a readable length.
+	//
+	// Tooltip() draws unconditionally (use inside your own hover test);
+	// ItemTooltip() gates on IsItemHovered() and replaces SetItemTooltip.
+	void Tooltip(IModLoaderImGui* ui, const char* text);
+	void ItemTooltip(IModLoaderImGui* ui, const char* text);
+
 	// Trailing "(?)" with a tooltip, right-aligned into the gutter that
 	// FullWidthItem reserves so it cannot be pushed off the panel.
 	void HelpMarker(IModLoaderImGui* ui, const char* text);
