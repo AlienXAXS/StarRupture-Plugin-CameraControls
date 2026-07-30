@@ -162,7 +162,8 @@ namespace CameraControls::ProjectIO
 			doc["name"]        = timeline.name;
 			doc["globalSpeed"] = timeline.globalSpeed;
 			doc["loop"]        = timeline.loop;
-			doc["frameRate"]   = timeline.frameRate;
+			doc["frameRate"]    = timeline.frameRate;
+			doc["depthOfField"] = timeline.depthOfField;
 
 			json keys = json::array();
 			for (const Keyframe& k : timeline.Keys())
@@ -173,6 +174,8 @@ namespace CameraControls::ProjectIO
 				j["location"]        = ToJson(k.location);
 				j["rotation"]        = json{ k.rotation.pitch, k.rotation.yaw, k.rotation.roll };
 				j["fov"]             = k.fov;
+				j["focusDistance"]   = k.focusDistance;
+				j["aperture"]        = k.aperture;
 				j["duration"]        = k.duration;
 				j["speed"]           = k.speed;
 				j["smoothness"]      = k.smoothness;
@@ -189,6 +192,27 @@ namespace CameraControls::ProjectIO
 				keys.push_back(std::move(j));
 			}
 			doc["keyframes"] = std::move(keys);
+
+			// Func frames. Absent in every project saved before cues existed,
+			// which loads as a project with no cues -- exactly what it is.
+			json funcs = json::array();
+			for (const FuncFrame& f : timeline.Funcs())
+			{
+				json j;
+				j["id"]       = f.id;
+				j["name"]     = f.name;
+				j["time"]     = f.time;
+				j["enabled"]  = f.enabled;
+				j["action"]   = static_cast<int>(f.action);
+				j["waveType"] = f.waveType;
+				j["stage"]        = f.stage;
+				j["progress"]     = f.progress;
+				j["ramp"]         = f.ramp;
+				j["progressEnd"]  = f.progressEnd;
+				j["rampDuration"] = f.rampDuration;
+				funcs.push_back(std::move(j));
+			}
+			doc["funcframes"] = std::move(funcs);
 
 			std::ofstream file(PathFor(name), std::ios::trunc);
 			if (!file)
@@ -244,6 +268,10 @@ namespace CameraControls::ProjectIO
 			loaded.loop        = doc.value("loop", false);
 			loaded.frameRate   = doc.value("frameRate", 30.0f);
 
+			// Missing in projects saved before depth of field existed, and the
+			// default is exactly right for them: they were composed without it.
+			loaded.depthOfField = doc.value("depthOfField", false);
+
 			uint32_t highestId = 0;
 
 			auto keys = doc.find("keyframes");
@@ -256,6 +284,8 @@ namespace CameraControls::ProjectIO
 					ReadInto(j, "id",              k.id);
 					ReadInto(j, "name",            k.name);
 					ReadInto(j, "fov",             k.fov);
+					ReadInto(j, "focusDistance",   k.focusDistance);
+					ReadInto(j, "aperture",        k.aperture);
 					ReadInto(j, "duration",        k.duration);
 					ReadInto(j, "speed",           k.speed);
 					ReadInto(j, "smoothness",      k.smoothness);
@@ -299,9 +329,51 @@ namespace CameraControls::ProjectIO
 				}
 			}
 
+			auto funcs = doc.find("funcframes");
+			if (funcs != doc.end() && funcs->is_array())
+			{
+				for (const json& j : *funcs)
+				{
+					FuncFrame f;
+
+					ReadInto(j, "id",       f.id);
+					ReadInto(j, "name",     f.name);
+					ReadInto(j, "time",     f.time);
+					ReadInto(j, "enabled",  f.enabled);
+					ReadInto(j, "waveType", f.waveType);
+					ReadInto(j, "stage",    f.stage);
+					ReadInto(j, "progress",     f.progress);
+					ReadInto(j, "ramp",         f.ramp);
+					ReadInto(j, "progressEnd",  f.progressEnd);
+					ReadInto(j, "rampDuration", f.rampDuration);
+
+					int action = static_cast<int>(f.action);
+					ReadInto(j, "action", action);
+					f.action = static_cast<FuncAction>(
+						Clamp(action, 0, static_cast<int>(FuncAction::Count) - 1));
+
+					// The parameters are range-checked again in world_func before
+					// they are cast into the game's enums, but clamping here means
+					// a hand-edited file shows sane values in the inspector rather
+					// than a blank combo.
+					f.waveType    = Clamp(f.waveType, 1, 2);
+					f.stage       = Clamp(f.stage,    1, 4);
+					f.progress    = Clamp(f.progress,    0.0f, 1.0f);
+					f.progressEnd = Clamp(f.progressEnd, 0.0f, 1.0f);
+					f.time         = std::max(f.time, 0.0);
+					f.rampDuration = std::max(f.rampDuration, 0.05);
+
+					if (f.id == 0)
+						f.id = highestId + 1;
+					highestId = std::max(highestId, f.id);
+
+					loaded.Funcs().push_back(f);
+				}
+			}
+
 			loaded.SetNextId(highestId + 1);
-			LOG_DEBUG("ProjectIO: loaded %d keyframes from %s (format v%d)",
-			          loaded.Count(), PathFor(name).c_str(), version);
+			LOG_DEBUG("ProjectIO: loaded %d keyframes and %d cues from %s (format v%d)",
+			          loaded.Count(), loaded.FuncCount(), PathFor(name).c_str(), version);
 			outTimeline = std::move(loaded);
 			return true;
 		}

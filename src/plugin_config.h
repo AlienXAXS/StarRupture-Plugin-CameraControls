@@ -40,7 +40,7 @@ namespace CameraControlsConfig
 		// --- Editing ---------------------------------------------------------
 		{ "Keybinds", "CaptureKeyframe", ConfigValueType::Keybind, "K",
 		  "Add a keyframe at the current camera pose" },
-		{ "Keybinds", "InsertKeyframe",  ConfigValueType::Keybind, "Shift+K",
+		{ "Keybinds", "InsertKeyframe",  ConfigValueType::Keybind, "I",
 		  "Insert a keyframe after the selected one" },
 		{ "Keybinds", "UpdateKeyframe",  ConfigValueType::Keybind, "U",
 		  "Overwrite the selected keyframe with the current camera pose" },

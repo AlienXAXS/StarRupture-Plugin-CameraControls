@@ -53,4 +53,15 @@ namespace CameraControls::Input
 	//
 	// Safe from any thread and takes no locks -- it only reads the OS.
 	void LogPhysicalMovementKeys(const char* when);
+
+	// Is either Control key physically down right now?
+	//
+	// For the timeline's Ctrl+click multi-select, which runs on the render
+	// thread. The modloader's ImGui interface exposes no keyboard state at all,
+	// and this is the same `GetAsyncKeyState` reading the loader's own modifier
+	// sampling uses -- so the answer here cannot disagree with the one the
+	// keybind dispatcher acted on.
+	//
+	// Safe from any thread and takes no locks.
+	bool CtrlHeld();
 }

@@ -175,11 +175,13 @@
     <ClInclude Include="editor_state.h" />
     <ClInclude Include="project_io.h" />
     <ClInclude Include="camera_rig.h" />
+    <ClInclude Include="fov_override.h" />
     <ClInclude Include="fly_controls.h" />
     <ClInclude Include="player_safeguard.h" />
     <ClInclude Include="player_vitals.h" />
     <ClInclude Include="hud_visibility.h" />
     <ClInclude Include="world_draw.h" />
+    <ClInclude Include="world_func.h" />
     <ClInclude Include="input_binds.h" />
     <ClInclude Include="ui_theme.h" />
     <ClInclude Include="ui_editor.h" />
@@ -205,11 +207,13 @@
     <ClCompile Include="editor_state.cpp" />
     <ClCompile Include="project_io.cpp" />
     <ClCompile Include="camera_rig.cpp" />
+    <ClCompile Include="fov_override.cpp" />
     <ClCompile Include="fly_controls.cpp" />
     <ClCompile Include="player_safeguard.cpp" />
     <ClCompile Include="player_vitals.cpp" />
     <ClCompile Include="hud_visibility.cpp" />
     <ClCompile Include="world_draw.cpp" />
+    <ClCompile Include="world_func.cpp" />
     <ClCompile Include="input_binds.cpp" />
     <ClCompile Include="ui_theme.cpp" />
     <ClCompile Include="ui_editor.cpp" />

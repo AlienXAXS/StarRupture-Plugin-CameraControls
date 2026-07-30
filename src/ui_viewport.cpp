@@ -202,8 +202,10 @@ namespace CameraControls::UI::Viewport
 			const Handle&   h   = handles[i];
 			const Keyframe& key = keys[h.index];
 
-			const bool selected = (key.id == state.selectedId &&
-			                       state.selection == Selection::Keyframe);
+			// IsSelected, so every member of a Ctrl+click group pulses in the
+			// viewport the same way it does on the track.
+			const bool selected = IsSelected(state, key.id) &&
+			                      state.selection != Selection::Segment;
 
 			Rgba color = key.enabled ? kKeyframe : kDisabled;
 			if (i == hovered) color = kKeyframeHover;
@@ -240,14 +242,12 @@ namespace CameraControls::UI::Viewport
 
 		if (ui->IsMouseDoubleClicked(0))
 		{
-			state.selectedId = key.id;
-			state.selection  = Selection::Keyframe;
+			SelectOnly(state, key.id);
 			Post(state, Request::GotoSelected);
 		}
 		else if (ui->IsMouseClicked(0, false))
 		{
-			state.selectedId = key.id;
-			state.selection  = Selection::Keyframe;
+			SelectOnly(state, key.id);
 		}
 	}
 }

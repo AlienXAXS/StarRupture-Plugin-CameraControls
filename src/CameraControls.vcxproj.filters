@@ -63,6 +63,9 @@
     <ClInclude Include="camera_rig.h">
       <Filter>Game</Filter>
     </ClInclude>
+    <ClInclude Include="fov_override.h">
+      <Filter>Game</Filter>
+    </ClInclude>
     <ClInclude Include="fly_controls.h">
       <Filter>Game</Filter>
     </ClInclude>
@@ -76,6 +79,9 @@
       <Filter>Game</Filter>
     </ClInclude>
     <ClInclude Include="world_draw.h">
+      <Filter>Game</Filter>
+    </ClInclude>
+    <ClInclude Include="world_func.h">
       <Filter>Game</Filter>
     </ClInclude>
     <ClInclude Include="input_binds.h">
@@ -146,6 +152,9 @@
     <ClCompile Include="camera_rig.cpp">
       <Filter>Game</Filter>
     </ClCompile>
+    <ClCompile Include="fov_override.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
     <ClCompile Include="fly_controls.cpp">
       <Filter>Game</Filter>
     </ClCompile>
@@ -159,6 +168,9 @@
       <Filter>Game</Filter>
     </ClCompile>
     <ClCompile Include="world_draw.cpp">
+      <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="world_func.cpp">
       <Filter>Game</Filter>
     </ClCompile>
     <ClCompile Include="input_binds.cpp">

@@ -17,6 +17,7 @@
 #include "ui_properties.h"
 #include "viewport_fit.h"
 #include "world_draw.h"
+#include "world_func.h"
 
 #include "Engine_classes.hpp"
 
@@ -108,6 +109,39 @@ namespace
 	// "nothing happened" without the UI having to report a drag.
 	double g_lastPlayhead = 0.0;
 
+	// True once a run of playback has swept cues at least once.
+	//
+	// The cue window is the interval the play integrator just covered, taken
+	// from the advance itself rather than from a cursor kept alongside it --
+	// which is what makes a scrub structurally unable to fire anything, instead
+	// of merely being excluded by a condition somebody has to remember.
+	//
+	// It is half-open, (from, to], so consecutive windows tile: no cue is
+	// skipped by a long frame and none fires twice across a pair of them. The
+	// exception is the first tick of a run, which closes the bottom -- otherwise
+	// a cue sitting exactly where playback starts (t = 0, most of the time) is
+	// stepped straight over.
+	bool g_funcSweepStarted = false;
+
+	// Which progress ramp is currently driving, and the last value pushed at the
+	// world.
+	//
+	// One pair rather than per-cue state: two overlapping ramps would be fighting
+	// over the same single number in the game whatever we did, so only one can be
+	// in charge, and the earliest one wins.
+	uint32_t g_rampCueId    = 0;
+	float    g_rampLastSent = 0.0f;
+	bool     g_rampFailed   = false;   // edge-trigger for the warning
+
+	// Forgets which ramp was driving, so re-entering one starts it afresh rather
+	// than picking up mid-interpolation against a world that has moved on.
+	void ResetFuncRamp()
+	{
+		g_rampCueId    = 0;
+		g_rampLastSent = 0.0f;
+		g_rampFailed   = false;
+	}
+
 	// Last value of the hide-HUD option the tick acted on. Hiding walks the
 	// object list, so it is driven off the edge rather than reconciled every
 	// frame against whether it happened to succeed.
@@ -131,9 +165,18 @@ namespace
 			case Request::GotoSelected:               return "GotoSelected";
 			case Request::SnapCameraToPlayhead:       return "SnapCameraToPlayhead";
 			case Request::LookAtSelectionFromCamera:  return "LookAtSelectionFromCamera";
+			case Request::FireSelectedFunc:           return "FireSelectedFunc";
 			case Request::DumpControlProbe:           return "DumpControlProbe";
 			default:                                  return "?";
 		}
+	}
+
+	// GotoSelected is the one request a *drag* can post: ui_properties re-posts
+	// it every frame that a pose field changes while the camera is sitting on
+	// the key, so logging the drain unconditionally buries the log in it.
+	bool RequestIsWorthLogging(Request request)
+	{
+		return request != Request::GotoSelected;
 	}
 
 	const char* ModeName(Mode mode)
@@ -305,7 +348,14 @@ namespace
 
 		state.flyPose  = start;
 		state.rigActive = true;
+		state.fovLive   = Rig::FovIsLive();
 		state.mode      = Mode::Editor;
+
+		if (!state.fovLive)
+		{
+			LOG_WARN("EnterEditor: the FOV override could not arm -- FOV changes will edit "
+			         "keyframes but will not change the picture");
+		}
 		state.playing   = false;
 		g_lastPlayhead  = state.playhead;
 
@@ -420,12 +470,16 @@ namespace
 		state.mode            = Mode::Off;
 		state.playing         = false;
 		state.rigActive       = false;
+		state.fovLive         = false;
 		state.countdown       = 0.0;
 		state.uiHidden        = false;
 		state.uiHovered       = false;
 		state.textInputActive = false;
 		state.gameViewValid   = false;
 		state.gameViewApplied = false;
+
+		g_funcSweepStarted = false;
+		ResetFuncRamp();
 
 		// Every step is followed by a probe, so the log carries what each one
 		// actually changed in the engine rather than only whether it threw. That
@@ -510,6 +564,11 @@ namespace
 		state.countdown = state.options.countdownSeconds;
 		g_lastPlayhead  = 0.0;
 
+		// A take is a fresh run whatever the editor's preview was doing, so a cue
+		// on the first frame still fires.
+		g_funcSweepStarted = false;
+		ResetFuncRamp();
+
 		UI::Editor::SetVisible(false);
 
 		// Normally already hidden by EnterEditor; this only bites if the option
@@ -539,6 +598,8 @@ namespace
 		state.mode      = Mode::Editor;
 		state.playing   = false;
 		state.countdown = 0.0;
+		g_funcSweepStarted = false;
+		ResetFuncRamp();
 
 		// Leave the camera where the take ended rather than snapping back --
 		// that pose is usually the one worth carrying on from.
@@ -557,17 +618,231 @@ namespace
 	}
 
 	// -----------------------------------------------------------------------
-	// Requests posted by the UI / keybinds
+	// Func frames
 	// -----------------------------------------------------------------------
-	Keyframe MakeKeyframeFromPose(const CameraPose& pose)
+
+	// Runs one cue and says so, in the log and on screen. Both, deliberately:
+	// a cue that changes the world without leaving a trace is indistinguishable
+	// from one that never ran, and this is the only part of the plugin whose
+	// effects outlive the session.
+	void FireFuncFrame(State& state, const FuncFrame& frame, double now)
 	{
-		Keyframe key;
-		key.location = pose.location;
-		key.rotation = pose.rotation;
-		key.fov      = pose.fov;
-		return key;
+		std::string message;
+		const bool ok = WorldFunc::Execute(frame, message);
+
+		if (ok)
+			LOG_INFO("FuncFrame: %s -- %s", FuncActionName(frame.action), message.c_str());
+		else
+			LOG_WARN("FuncFrame: %s did not run -- %s", FuncActionName(frame.action), message.c_str());
+
+		SetStatus(state, now, message.c_str());
 	}
 
+	// A ramping Advance cue is not an event, so it does not go through the
+	// crossing sweep at all -- it has a span, and what it wants is for the
+	// world to match wherever the playhead currently sits inside that span.
+	// Driving it positionally rather than by firing at the edges is what makes
+	// scrubbing into the middle of a ramp land on the right value instead of on
+	// whatever the last edge crossing happened to leave behind.
+	bool IsRamp(const FuncFrame& frame)
+	{
+		return frame.action == FuncAction::SetRuptureProgress && frame.ramp;
+	}
+
+	// Smallest change worth spending a UFunction call on. Also what stops a
+	// playhead parked inside a ramp from writing the same number sixty times a
+	// second: once it has settled, nothing more is sent until it moves again.
+	constexpr float kRampEpsilon = 0.0005f;
+
+	void HoldFuncRamps(State& state, double now)
+	{
+		const double playhead = state.playhead;
+
+		const FuncFrame* active = nullptr;
+		double           u      = 0.0;
+
+		for (const FuncFrame& frame : state.timeline.Funcs())
+		{
+			if (!frame.enabled || !IsRamp(frame))
+				continue;
+
+			const double span = std::max(frame.rampDuration, 0.0);
+			if (playhead < frame.time || playhead > frame.time + span)
+				continue;
+
+			active = &frame;
+			u      = span > 0.0 ? Clamp((playhead - frame.time) / span, 0.0, 1.0) : 1.0;
+			break;
+		}
+
+		if (!active)
+		{
+			// Just left one. Going forward, land exactly on the value it was
+			// heading for -- the last in-span tick stopped a frame short of it,
+			// and leaving a ramp a fraction below its target is the kind of thing
+			// that only shows up on the recording. Going backwards, nothing: a
+			// progress cue has no inverse, and inventing one here would be the
+			// same mistake ReverseOf exists to avoid.
+			if (g_rampCueId != 0)
+			{
+				const FuncFrame* previous = state.timeline.FindFunc(g_rampCueId);
+				if (previous && playhead > previous->time + std::max(previous->rampDuration, 0.0))
+					WorldFunc::HoldRuptureProgress(Clamp(previous->progressEnd, 0.0f, 1.0f));
+
+				LOG_DEBUG("FuncFrame: left the progress ramp on cue %u", g_rampCueId);
+				g_rampCueId  = 0;
+				g_rampFailed = false;
+			}
+			return;
+		}
+
+		const float value = static_cast<float>(
+			Lerp(static_cast<double>(Clamp(active->progress,    0.0f, 1.0f)),
+			     static_cast<double>(Clamp(active->progressEnd, 0.0f, 1.0f)), u));
+
+		const bool entered = g_rampCueId != active->id;
+		if (entered)
+		{
+			LOG_DEBUG("FuncFrame: entered the progress ramp on cue %u (%.0f%% -> %.0f%% over %.2fs)",
+			          active->id, active->progress * 100.0f, active->progressEnd * 100.0f,
+			          active->rampDuration);
+			g_rampCueId  = active->id;
+			g_rampFailed = false;
+		}
+		else if (std::fabs(value - g_rampLastSent) < kRampEpsilon)
+		{
+			return;   // settled, or the playhead has not moved enough to matter
+		}
+
+		g_rampLastSent = value;
+
+		if (WorldFunc::HoldRuptureProgress(value))
+		{
+			g_rampFailed = false;
+			return;
+		}
+
+		// Edge-triggered: a ramp with no rupture to drive would otherwise say so
+		// once per frame for as long as the playhead sits inside it.
+		if (!g_rampFailed)
+		{
+			g_rampFailed = true;
+			LOG_WARN("FuncFrame: the progress ramp on cue %u has no rupture to drive", active->id);
+			SetStatus(state, now, "Progress ramp: no rupture running");
+		}
+	}
+
+	// Runs the inverse of a cue the playhead was just dragged back over.
+	//
+	// Silent for the actions that have none -- see ReverseOf. Deliberately not
+	// folded into FireFuncFrame: the log has to say that this ran because of a
+	// backward scrub, or a lone "Rupture cancelled" in the file looks like a cue
+	// firing normally and there is no way to tell them apart afterwards.
+	void RewindFuncFrame(State& state, const FuncFrame& original, double now)
+	{
+		FuncFrame undo = original;
+		undo.action = ReverseOf(original.action);
+
+		if (undo.action == FuncAction::None)
+			return;
+
+		std::string message;
+		const bool ok = WorldFunc::Execute(undo, message);
+
+		if (ok)
+			LOG_INFO("FuncFrame: scrubbed back over '%s', ran '%s' -- %s",
+			         FuncActionName(original.action), FuncActionName(undo.action), message.c_str());
+		else
+			LOG_WARN("FuncFrame: scrubbed back over '%s', '%s' did not run -- %s",
+			         FuncActionName(original.action), FuncActionName(undo.action), message.c_str());
+
+		char line[224];
+		snprintf(line, sizeof(line), "Scrubbed back -- %s", message.c_str());
+		SetStatus(state, now, line);
+	}
+
+	// Undoes the cues the playhead was just dragged back over, newest first --
+	// the order they are crossed on the way back.
+	//
+	// The interval is `(to, from]`, the mirror of what a forward drag across the
+	// same stretch would have fired, so dragging out and back undoes exactly what
+	// it did rather than one cue more or less at the ends.
+	void RewindFuncWindow(State& state, double from, double to, double now)
+	{
+		if (from <= to || state.timeline.Funcs().empty())
+			return;
+
+		std::vector<const FuncFrame*> crossed;
+		for (const FuncFrame& frame : state.timeline.Funcs())
+		{
+			if (!frame.enabled || ReverseOf(frame.action) == FuncAction::None)
+				continue;
+			if (frame.time > to && frame.time <= from)
+				crossed.push_back(&frame);
+		}
+
+		if (crossed.empty())
+			return;
+
+		std::sort(crossed.begin(), crossed.end(),
+		          [](const FuncFrame* a, const FuncFrame* b) { return a->time > b->time; });
+
+		for (const FuncFrame* frame : crossed)
+			RewindFuncFrame(state, *frame, now);
+	}
+
+	// Fires every enabled cue in the interval the playhead just moved through,
+	// in time order.
+	//
+	// `from`..`to` is that interval, so calling this *is* the statement that the
+	// playhead advanced -- there is no cursor kept alongside it that could get
+	// out of step. `includeFrom` closes the bottom of the window; the caller
+	// decides, because only the first tick of a play run wants it. Sorted into a
+	// local copy rather than keeping the storage ordered -- see Timeline::Funcs().
+	void FireFuncWindow(State& state, double from, double to, bool includeFrom, double now)
+	{
+		if (to < from || state.timeline.Funcs().empty())
+			return;
+
+		std::vector<const FuncFrame*> due;
+		for (const FuncFrame& frame : state.timeline.Funcs())
+		{
+			if (!frame.enabled || frame.action == FuncAction::None)
+				continue;
+
+			// A ramp has a span and is driven from the playhead's position by
+			// HoldFuncRamps. Firing it here as well would write its start value
+			// on the crossing frame and then be immediately overwritten -- one
+			// redundant call, and a log line implying an event that is not one.
+			if (IsRamp(frame))
+				continue;
+
+			const bool afterStart = includeFrom ? frame.time >= from : frame.time > from;
+			if (afterStart && frame.time <= to)
+				due.push_back(&frame);
+		}
+
+		if (due.empty())
+			return;
+
+		std::sort(due.begin(), due.end(),
+		          [](const FuncFrame* a, const FuncFrame* b) { return a->time < b->time; });
+
+		for (const FuncFrame* frame : due)
+			FireFuncFrame(state, *frame, now);
+	}
+
+	// The playing-forward case: half-open, except on the first tick of a run.
+	void SweepFuncFrames(State& state, double from, double to, double now)
+	{
+		const bool includeFrom = !g_funcSweepStarted;
+		g_funcSweepStarted = true;
+		FireFuncWindow(state, from, to, includeFrom, now);
+	}
+
+	// -----------------------------------------------------------------------
+	// Requests posted by the UI / keybinds
+	// -----------------------------------------------------------------------
 	void HandleRequest(State& state, Request request, double now)
 	{
 		switch (request)
@@ -580,9 +855,8 @@ namespace
 			case Request::CaptureAppend:
 			{
 				const uint32_t id = state.timeline.Append(MakeKeyframeFromPose(state.flyPose));
-				state.selectedId  = id;
-				state.selection   = Selection::Keyframe;
-				state.dirty       = true;
+				SelectOnly(state, id);
+				state.dirty = true;
 
 				char message[64];
 				snprintf(message, sizeof(message), "Keyframe %d added", state.timeline.Count());
@@ -594,9 +868,8 @@ namespace
 			{
 				const int index = state.timeline.IndexOf(state.selectedId);
 				const uint32_t id = state.timeline.InsertAfter(index, MakeKeyframeFromPose(state.flyPose));
-				state.selectedId  = id;
-				state.selection   = Selection::Keyframe;
-				state.dirty       = true;
+				SelectOnly(state, id);
+				state.dirty = true;
 				SetStatus(state, now, "Keyframe inserted");
 				break;
 			}
@@ -610,10 +883,12 @@ namespace
 					break;
 				}
 
-				key->location = state.flyPose.location;
-				key->rotation = state.flyPose.rotation;
-				key->fov      = state.flyPose.fov;
-				state.dirty   = true;
+				key->location      = state.flyPose.location;
+				key->rotation      = state.flyPose.rotation;
+				key->fov           = state.flyPose.fov;
+				key->focusDistance = state.flyPose.focusDistance;
+				key->aperture      = state.flyPose.aperture;
+				state.dirty        = true;
 				SetStatus(state, now, "Keyframe re-recorded");
 				break;
 			}
@@ -631,7 +906,9 @@ namespace
 				state.flyPose.rotation = key->lookAt
 					? LookAtRotation(key->location, key->lookAtTarget)
 					: key->rotation;
-				state.flyPose.fov = key->fov;
+				state.flyPose.fov           = key->fov;
+				state.flyPose.focusDistance = key->focusDistance;
+				state.flyPose.aperture      = key->aperture;
 
 				// Park the playhead on it too, so the world playhead gizmo and
 				// the camera agree about where we are.
@@ -665,6 +942,22 @@ namespace
 				Input::LogPhysicalMovementKeys("probe dump");
 				Probe::DumpNow(state);
 				SetStatus(state, now, "Control probe written to the log");
+				break;
+			}
+
+			case Request::FireSelectedFunc:
+			{
+				const FuncFrame* frame = state.timeline.FindFunc(state.selectedId);
+				if (!frame)
+				{
+					SetStatus(state, now, "Select a cue first");
+					break;
+				}
+
+				// Deliberately ignores `enabled`: the button says trigger now, and
+				// pressing it on a disabled cue to see what it does is exactly what
+				// the disabled flag is for during editing.
+				FireFuncFrame(state, *frame, now);
 				break;
 			}
 
@@ -726,21 +1019,84 @@ namespace
 
 		const double total = state.timeline.TotalDuration();
 
+		// Read and clear in one place, whichever branch below runs. A latch left
+		// set through a tick that ignored it would fire against the *next* tick's
+		// interval, which is a cue going off for a movement that never happened.
+		const double previousPlayhead = g_lastPlayhead;
+		const bool   userScrubbed     = state.playheadScrubbed;
+		state.playheadScrubbed = false;
+
 		// Preview playback advances the playhead; a scrub moves it from the UI.
+		//
+		// Cues fire here as well as during a take, and on purpose: the preview
+		// runs the same clock, so one that fired in a take and not in the preview
+		// would be a preview that lies about the take -- which is the one thing a
+		// preview may not do. A scrub still fires nothing, because nothing here
+		// sweeps unless this branch ran.
 		if (state.playing && total > 0.0)
 		{
+			const double from = state.playhead;
 			state.playhead += dt * std::max(state.timeline.globalSpeed, 0.01f);
+
 			if (state.playhead >= total)
 			{
+				// Out to the end of the shot before wrapping or stopping, or
+				// anything in the last fraction of a second is stepped over.
+				SweepFuncFrames(state, from, total, now);
+
 				if (state.timeline.loop)
-					state.playhead = 0.0;
+				{
+					state.playhead     = 0.0;
+					g_funcSweepStarted = false;   // the next lap starts a fresh run
+				}
 				else
 				{
 					state.playhead = total;
 					state.playing  = false;
 				}
 			}
+			else
+			{
+				SweepFuncFrames(state, from, state.playhead, now);
+			}
 		}
+		else
+		{
+			// Not playing: paused, scrubbing, or flying by hand. Whatever comes
+			// next is a new run, and its first window has to be closed at the
+			// bottom again so a cue sitting exactly where it resumes still fires.
+			g_funcSweepStarted = false;
+
+			// Dragging the playhead runs cues too, so the world keeps up with
+			// where you have scrubbed to instead of only ever matching during a
+			// take. Both directions: forward fires them, backward runs whatever
+			// inverse each one has, so scrubbing out over a "start the rupture"
+			// cue and back again leaves the world where it started.
+			//
+			// The two windows are mirrors -- forward `(previous, playhead]`,
+			// backward `(playhead, previous]` -- so a drag out and back undoes
+			// exactly the set it fired rather than one cue more or less at the
+			// ends. Only three actions have an inverse and the rest are skipped
+			// silently; see ReverseOf for why guessing at the others is worse
+			// than leaving them alone.
+			//
+			// Both are strictly half-open, unlike a play run: the closed bottom
+			// there exists so a run *starting* on a cue still fires it, and
+			// reusing it here would re-run whatever sits at the previous position
+			// on every frame of the drag.
+			if (userScrubbed)
+			{
+				if (state.playhead > previousPlayhead)
+					FireFuncWindow(state, previousPlayhead, state.playhead, false, now);
+				else if (state.playhead < previousPlayhead)
+					RewindFuncWindow(state, previousPlayhead, state.playhead, now);
+			}
+		}
+
+		// After the playhead has settled for this tick, and unconditionally --
+		// a ramp is positional, so it has to be re-evaluated whether the playhead
+		// moved by playing, by scrubbing, or not at all.
+		HoldFuncRamps(state, now);
 
 		const bool scrubbed = std::abs(state.playhead - g_lastPlayhead) > 1e-6;
 		const bool manual   = HasFlyInput(state.flyInput);
@@ -767,6 +1123,10 @@ namespace
 		else
 		{
 			Fly::Integrate(state.flyPose, state.flyInput, state.options, dt);
+
+			// Stamped rather than interpolated -- the free camera has no playhead to
+			// read it from, and Evaluate does the same for the preview branch above.
+			state.flyPose.depthOfField = state.timeline.depthOfField;
 			Rig::ApplyPose(state.flyPose);
 		}
 
@@ -871,13 +1231,22 @@ namespace
 			return;
 		}
 
+		const double from = state.playhead;
 		state.playhead += dt * std::max(state.timeline.globalSpeed, 0.01f);
 
 		if (state.playhead >= total)
 		{
+			// Out to the end of the shot before wrapping or stopping, or a cue in
+			// the last fraction of a second is stepped straight over.
+			SweepFuncFrames(state, from, total, now);
+
 			if (state.timeline.loop)
 			{
-				state.playhead = std::fmod(state.playhead, total);
+				state.playhead     = std::fmod(state.playhead, total);
+				g_funcSweepStarted = false;   // the next lap starts a fresh run
+
+				// Whatever the wrap landed on, from the top of the shot.
+				SweepFuncFrames(state, 0.0, state.playhead, now);
 			}
 			else
 			{
@@ -890,6 +1259,12 @@ namespace
 				return;
 			}
 		}
+		else
+		{
+			SweepFuncFrames(state, from, state.playhead, now);
+		}
+
+		HoldFuncRamps(state, now);
 
 		CameraPose pose;
 		if (state.timeline.Evaluate(state.playhead, pose))
@@ -939,8 +1314,9 @@ namespace
 			pending.swap(state.requests);
 			for (Request request : pending)
 			{
-				LOG_DEBUG("Tick: handling request %s (mode %s)",
-				          RequestName(request), ModeName(state.mode));
+				if (RequestIsWorthLogging(request))
+					LOG_DEBUG("Tick: handling request %s (mode %s)",
+					          RequestName(request), ModeName(state.mode));
 				HandleRequest(state, request, now);
 			}
 		}
@@ -1023,41 +1399,6 @@ namespace
 		if (state.options.protectPlayer)
 			Safeguard::Hold();
 
-		static double s_nextHeartbeat = 0.0;
-		if (now >= s_nextHeartbeat)
-		{
-			s_nextHeartbeat = now + 5.0;
-			LOG_TRACE("Tick: mode=%s playhead=%.2f/%.2f keys=%d rig=%d safeguard=%d vitals=%d "
-			          "guard=%d%d%d",
-			          ModeName(state.mode), state.playhead, state.timeline.TotalDuration(),
-			          state.timeline.Count(), Rig::IsActive() ? 1 : 0,
-			          Safeguard::IsEngaged() ? 1 : 0, Vitals::IsActive() ? 1 : 0,
-			          DeathGuard::BoundsSuppressed() ? 1 : 0,
-			          DeathGuard::DamageBlocked() ? 1 : 0,
-			          DeathGuard::GameImmortal() ? 1 : 0);
-
-			// Alignment diagnostic, on the same 5-second beat, all three rects in
-			// the same units. The engine's rect is measured from its own
-			// projections; ours is what we asked viewport_fit for; the window is
-			// what ImGui is drawing into. Any handle/gizmo disagreement has to
-			// show up as a mismatch between these.
-			if (state.mode == Mode::Editor && state.displayW > 0.0f)
-			{
-				float ex = 0.0f, ey = 0.0f, ew = 0.0f, eh = 0.0f;
-				if (Rig::MeasureViewRect(state.renderViewValid ? state.renderView : state.flyPose,
-				                         ex, ey, ew, eh))
-				{
-					LOG_TRACE("Tick: engine rect %.0f,%.0f %.0fx%.0f | ours %.0f,%.0f %.0fx%.0f "
-					          "| window %.0fx%.0f | squeezed %d",
-					          ex, ey, ew, eh,
-					          state.gameView.x * state.displayW, state.gameView.y * state.displayH,
-					          state.gameView.w * state.displayW, state.gameView.h * state.displayH,
-					          state.displayW, state.displayH,
-					          state.gameViewApplied ? 1 : 0);
-				}
-			}
-		}
-
 		if (state.mode == Mode::Editor)
 			TickEditor(state, deltaSeconds, now);
 		else
@@ -1121,6 +1462,9 @@ namespace
 		state.gameViewValid   = false;
 		state.gameViewApplied = false;
 
+		g_funcSweepStarted = false;
+		ResetFuncRamp();
+
 		Probe::Forget();
 		Rig::ForgetWorldState();
 		Safeguard::ForgetWorldState();
@@ -1128,6 +1472,7 @@ namespace
 		ViewportFit::ForgetWorldState();
 		Vitals::ForgetWorldState();
 		Hud::ForgetWorldState();
+		WorldFunc::ForgetWorldState();
 	}
 
 	// Pulls the ini values into the live Options, which the UI then edits for

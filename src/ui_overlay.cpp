@@ -42,6 +42,7 @@ namespace CameraControls::UI::Overlay
 			{ RowKind::Bind,    "FlyBoost",        "LeftShift",   "faster (hold)" },
 			{ RowKind::Bind,    "FlyCrawl",        "LeftControl", "slower (hold)" },
 			{ RowKind::Literal, nullptr,           nullptr,       "Right mouse -- look around" },
+			{ RowKind::Literal, nullptr,           nullptr,       "Wheel while looking -- fly speed" },
 			{ RowKind::Bind,    "RollLeft",        "Z",           "roll left" },
 			{ RowKind::Bind,    "RollRight",       "C",           "roll right" },
 			{ RowKind::Bind,    "FovIn",           "R",           "zoom in" },
@@ -50,13 +51,15 @@ namespace CameraControls::UI::Overlay
 
 			{ RowKind::Section, nullptr,           nullptr,       "KEYFRAMES" },
 			{ RowKind::Bind,    "CaptureKeyframe", "K",           "add at camera" },
-			{ RowKind::Bind,    "InsertKeyframe",  "Shift+K",     "insert after selected" },
+			{ RowKind::Bind,    "InsertKeyframe",  "I",           "insert after selected" },
 			{ RowKind::Bind,    "UpdateKeyframe",  "U",           "re-record selected" },
 			{ RowKind::Bind,    "GotoKeyframe",    "G",           "fly to selected" },
 			{ RowKind::Bind,    "DeleteKeyframe",  "Delete",      "delete selected" },
 			{ RowKind::Bind,    "PrevKeyframe",    "Comma",       "select previous" },
 			{ RowKind::Bind,    "NextKeyframe",    "Period",      "select next" },
 			{ RowKind::Literal, nullptr,           nullptr,       "Double-click a clip -- fly there" },
+			{ RowKind::Literal, nullptr,           nullptr,       "Right-click the track -- add a keyframe or cue" },
+			{ RowKind::Literal, nullptr,           nullptr,       "Ctrl+click -- select several, drag as one" },
 
 			{ RowKind::Section, nullptr,           nullptr,       "TRANSPORT" },
 			{ RowKind::Bind,    "PlayPause",       "SpaceBar",    "preview play / pause" },
@@ -147,12 +150,21 @@ namespace CameraControls::UI::Overlay
 
 			// Live read-out under the cheat-sheet: where the camera is, and
 			// whether the world gizmos are actually going to show up.
-			char readout[192];
+			// The FOV is shown twice on purpose: asked-for, then what the camera
+			// manager is really rendering. They used to differ silently, because the
+			// game overwrites POV.FOV every frame -- one number could never have
+			// shown that, and two make it obvious at a glance. Only while they
+			// disagree, so a healthy session stays uncluttered.
+			char actual[24] = {};
+			if (state.renderViewValid && std::fabs(state.renderView.fov - state.flyPose.fov) > 1.0f)
+				snprintf(actual, sizeof(actual), " (rendering %.0f)", state.renderView.fov);
+
+			char readout[224];
 			snprintf(readout, sizeof(readout),
-			         "%.0f  %.0f  %.0f      pitch %.1f  yaw %.1f  roll %.1f      FOV %.0f",
+			         "%.0f  %.0f  %.0f      pitch %.1f  yaw %.1f  roll %.1f      FOV %.0f%s",
 			         state.flyPose.location.x, state.flyPose.location.y, state.flyPose.location.z,
 			         state.flyPose.rotation.pitch, state.flyPose.rotation.yaw,
-			         state.flyPose.rotation.roll, state.flyPose.fov);
+			         state.flyPose.rotation.roll, state.flyPose.fov, actual);
 
 			float rw = 0.0f, rh = 0.0f;
 			ui->CalcTextSize(readout, &rw, &rh, false, -1.0f);

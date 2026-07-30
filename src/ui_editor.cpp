@@ -8,6 +8,7 @@
 #include "plugin_helpers.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace CameraControls::UI::Editor
@@ -289,7 +290,15 @@ namespace CameraControls::UI::Editor
 			                "new keyframe at the end of the timeline.");
 
 			ui->SameLine(0.0f, 4.0f);
-			ui->BeginDisabled(state.selection == Selection::None || state.selectedId == 0);
+			// Keyframe or segment specifically, not "anything selected": with a
+			// cue selected there is no index to insert after, and InsertAfter(-1)
+			// prepends -- which puts the new keyframe at the *front* of the shot.
+			// A multi-selection is out for the same reason: "after the selection"
+			// names no single place.
+			ui->BeginDisabled(state.selectedId == 0 ||
+			                  !state.multiSelection.empty() ||
+			                  (state.selection != Selection::Keyframe &&
+			                   state.selection != Selection::Segment));
 			if (ui->ButtonSized(CC_ICON_PLAYLIST_ADD "##insertkey", w, h))
 				Post(state, Request::CaptureInsertAfterSelected);
 			ItemTooltip(ui, "Insert after the selection.\n\n"
@@ -341,7 +350,11 @@ namespace CameraControls::UI::Editor
 			// "half a second later" -- these are the fine adjustment.
 			{
 				const int  index = timeline.IndexOf(state.selectedId);
-				const bool canNudge = index > 0 && state.selection != Selection::None;
+				// Single selection only. Nudging a group is what dragging it does,
+				// and a nudge that silently moved one member of a set would be
+				// worse than one that is greyed out.
+				const bool canNudge = index > 0 && state.selection != Selection::None &&
+				                      state.multiSelection.empty();
 
 				ui->SameLine(0.0f, 18.0f);
 				ui->AlignTextToFramePadding();
@@ -413,6 +426,47 @@ namespace CameraControls::UI::Editor
 		}
 
 		// -------------------------------------------------------------------
+		// Wheel while looking = fly speed
+		//
+		// The convention every flycam shares, and it wants no keybind: the hand
+		// that is already holding right-mouse to steer is on the wheel.
+		//
+		// It has to be read here, on the render thread. `WM_MOUSEWHEEL` never
+		// reaches the plugin -- ImGui consumes it -- so `GetMouseWheel` off ImGuiIO
+		// is the only view of it there is, which is also why this cannot live in
+		// `input_binds` next to the rest of the camera input.
+		//
+		// Gated on the look drag rather than on "the cursor is not over a panel",
+		// because during a drag the cursor is pinned to the middle of the window
+		// and its position has stopped meaning anything.
+		// -------------------------------------------------------------------
+		void HandleFlySpeedWheel(IModLoaderImGui* ui, State& state, double now)
+		{
+			if (state.mode != Mode::Editor || !state.lookActive)
+				return;
+
+			const float wheel = ui->GetMouseWheel();
+			if (wheel == 0.0f)
+				return;
+
+			// Multiplicative, because the range spans two orders of magnitude: a
+			// fixed step big enough to be useful at 8000 u/s makes the bottom of
+			// the range unreachable, and one fine enough at 200 u/s never gets
+			// anywhere near the top.
+			const float factor = std::pow(1.15f, wheel);
+
+			state.options.flySpeed =
+				Clamp(state.options.flySpeed * factor, kFlySpeedMin, kFlySpeedMax);
+
+			// Worth a status line: the speed is otherwise invisible unless the
+			// inspector happens to be scrolled to it, and F9 may have hidden the
+			// inspector entirely. The number is the feedback.
+			char message[48];
+			snprintf(message, sizeof(message), "Fly speed  %.0f u/s", state.options.flySpeed);
+			SetStatus(state, now, message);
+		}
+
+		// -------------------------------------------------------------------
 		// Widget callbacks
 		// -------------------------------------------------------------------
 		void RenderTimelineWindow(IModLoaderImGui* ui)
@@ -479,6 +533,11 @@ namespace CameraControls::UI::Editor
 			// stale squeezed rect would letterbox the fade and the chrome into
 			// a picture that is no longer there.
 			UpdateLayout(ui, state);
+
+			// Before the timeline widget gets a chance to read the same wheel for
+			// its zoom. Both only ever read it, so neither consumes it from the
+			// other -- the timeline is guarded on its own side too.
+			HandleFlySpeedWheel(ui, state, now);
 
 			// Mask first -- it goes on the background list, so it sits under
 			// everything else regardless, but keeping the order honest makes

@@ -22,6 +22,9 @@ namespace CameraControls::UI::Properties
 		char     g_keyNameBuf[64]     = {};
 		uint32_t g_keyNameBufOwner    = 0;
 
+		char     g_funcNameBuf[64]    = {};
+		uint32_t g_funcNameBufOwner   = 0;
+
 		char     g_projectNameBuf[64] = {};
 		bool     g_projectNameSynced  = false;
 
@@ -200,6 +203,21 @@ namespace CameraControls::UI::Properties
 				poseEdited  = true;
 			}
 
+			// Said out loud rather than left to be discovered. This slider edits the
+			// keyframe either way -- the gizmo and the saved project honour it -- but
+			// with the override unarmed the game's camera manager keeps overwriting
+			// the rendered FOV, and a control that moves the number without moving
+			// the picture is the exact bug `fov_override` exists to fix.
+			if (state.rigActive && !state.fovLive)
+			{
+				TextColored(ui, kDanger, "FOV is not reaching the screen on this build");
+				ItemTooltip(ui, "The game's camera manager is overriding the FOV and the "
+				                "plugin could not hook it -- see the log for what the probe "
+				                "found.\n\n"
+				                "Keyframes still store the FOV, so nothing is lost, but the "
+				                "view will not change.");
+			}
+
 			ui->Spacing();
 
 			// --- Aim ----------------------------------------------------------
@@ -235,6 +253,77 @@ namespace CameraControls::UI::Properties
 					Post(state, Request::LookAtSelectionFromCamera);
 				HelpMarker(ui, "Puts the target 10 m in front of wherever the fly camera "
 				               "is currently pointing.");
+			}
+
+			ui->Spacing();
+
+			// --- Focus ----------------------------------------------------------
+			ui->SeparatorText("Focus");
+
+			// The switch is the *project's*, shown here rather than in the project
+			// panel on purpose: this is where someone is looking when they want
+			// depth of field, and splitting the on/off from the two numbers it
+			// governs across two panels would be worse than the small impurity.
+			bool dof = state.timeline.depthOfField;
+			if (ui->Checkbox("Depth of field", &dof))
+			{
+				state.timeline.depthOfField = dof;
+				state.dirty                 = true;
+				poseEdited                  = true;
+			}
+			HelpMarker(ui, "Overrides the game's depth of field for the whole shot, so the "
+			               "focus distance and aperture below do something.\n\n"
+			               "One switch for every keyframe, because focus fading in and out of "
+			               "existence partway through a move would just pop. The distance and "
+			               "aperture themselves are per-keyframe and animate, which is what a "
+			               "focus pull is.");
+
+			if (state.timeline.depthOfField)
+			{
+				// Metres in the UI, centimetres in the model. A drag rather than a
+				// slider because the useful range spans three orders of magnitude --
+				// a linear slider from 0.1 m to 500 m gives about two pixels to
+				// everything closer than arm's length.
+				float focusMetres = key.focusDistance / 100.0f;
+				FullWidthItem(ui);
+				if (ui->DragFloat("##focus", &focusMetres, 0.1f, 0.05f, 10000.0f, "Focus  %.2f m"))
+				{
+					key.focusDistance = std::max(focusMetres, 0.05f) * 100.0f;
+					state.dirty       = true;
+					poseEdited        = true;
+				}
+
+				// Lower f-stop = shallower depth of field. A slider here because the
+				// range is small, bounded and evenly useful across all of it.
+				FullWidthItem(ui);
+				if (ui->SliderFloat("##aperture", &key.aperture, 0.5f, 32.0f, "Aperture  f/%.1f"))
+				{
+					state.dirty = true;
+					poseEdited  = true;
+				}
+				HelpMarker(ui, "How shallow the focus is. f/1.4 throws everything but the focus "
+				               "distance out; f/22 is sharp almost throughout.\n\n"
+				               "Sensor width is left at the game's own value, so this number "
+				               "means the same thing here as it does everywhere else in the "
+				               "game's look.");
+
+				if (key.lookAt)
+				{
+					const double toTarget = (key.lookAtTarget - key.location).Length();
+
+					char focusOnTarget[64];
+					snprintf(focusOnTarget, sizeof(focusOnTarget),
+					         CC_ICON_FOCUS "  Focus on the target (%.2f m)", toTarget / 100.0);
+
+					if (ui->Button(focusOnTarget))
+					{
+						key.focusDistance = static_cast<float>(std::max(toTarget, 5.0));
+						state.dirty       = true;
+						poseEdited        = true;
+					}
+					ItemTooltip(ui, "Sets the focus distance to exactly where this keyframe is "
+					                "aiming, so the subject is sharp.");
+				}
 			}
 
 			// Feed the edit back to the live camera, so the viewport tracks the
@@ -372,11 +461,344 @@ namespace CameraControls::UI::Properties
 			if (ui->ButtonSized(CC_ICON_DELETE "  Delete keyframe", availX, rowHeight))
 			{
 				const uint32_t doomed = key.id;
-				state.selectedId = 0;
-				state.selection  = Selection::None;
+				ClearSelection(state);
 				state.timeline.Remove(doomed);
 				state.dirty = true;
 				SetStatus(state, now, "Keyframe deleted");
+			}
+			ui->PopStyleColor(3);
+		}
+
+		// -------------------------------------------------------------------
+		// Multi-selection
+		//
+		// Deliberately thin. Every other panel here edits one thing, and the
+		// controls are worded for one thing -- "this keyframe's" rotation, "the
+		// running rupture". Offering a subset of them across a mixed bag of
+		// keyframes and cues would mean inventing an answer for every field where
+		// the members disagree, which is a lot of design for an editor whose real
+		// multi-item operations are *drag them* and *delete them*.
+		//
+		// So: say what is selected, and offer the one action that means the same
+		// thing for all of them.
+		// -------------------------------------------------------------------
+		void RenderMultiSelection(IModLoaderImGui* ui, State& state, double now)
+		{
+			int keyCount = 0;
+			int cueCount = 0;
+			for (uint32_t id : state.multiSelection)
+			{
+				if (state.timeline.Find(id))          ++keyCount;
+				else if (state.timeline.FindFunc(id)) ++cueCount;
+			}
+
+			char header[96];
+			snprintf(header, sizeof(header), "%d selected",
+			         static_cast<int>(state.multiSelection.size()));
+			ui->SeparatorText(header);
+
+			char line[128];
+			if (keyCount > 0 && cueCount > 0)
+				snprintf(line, sizeof(line), "%d keyframe%s and %d cue%s",
+				         keyCount, keyCount == 1 ? "" : "s",
+				         cueCount, cueCount == 1 ? "" : "s");
+			else if (keyCount > 0)
+				snprintf(line, sizeof(line), "%d keyframe%s", keyCount, keyCount == 1 ? "" : "s");
+			else
+				snprintf(line, sizeof(line), "%d cue%s", cueCount, cueCount == 1 ? "" : "s");
+			ui->TextDisabled(line);
+
+			ui->Spacing();
+			ui->TextWrapped("Drag any one of them on the track to move the whole group, keeping "
+			                "the spacing between them.");
+			ui->Spacing();
+			ui->TextDisabled("Ctrl+click to add or remove one.");
+			ui->TextDisabled("Click anything on its own to go back to editing it.");
+
+			ui->Spacing();
+			ui->Separator();
+			ui->Spacing();
+
+			float availX = 0.0f, availY = 0.0f;
+			ui->GetContentRegionAvail(&availX, &availY);
+			const float rowHeight = ui->GetFrameHeight() * 1.15f;
+
+			ui->PushStyleColor(Col_Button,        kDanger.r * 0.6f, kDanger.g * 0.6f, kDanger.b * 0.6f, 1.0f);
+			ui->PushStyleColor(Col_ButtonHovered, kDanger.r, kDanger.g, kDanger.b, 1.0f);
+			ui->PushStyleColor(Col_ButtonActive,  kDanger.r, kDanger.g, kDanger.b, 1.0f);
+
+			snprintf(line, sizeof(line), CC_ICON_DELETE "  Delete all %d",
+			         static_cast<int>(state.multiSelection.size()));
+
+			if (ui->ButtonSized(line, availX, rowHeight))
+			{
+				// Copy the ids out first: ClearSelection empties the very vector
+				// this would otherwise be iterating.
+				const std::vector<uint32_t> doomed = state.multiSelection;
+				ClearSelection(state);
+
+				for (uint32_t id : doomed)
+				{
+					if (!state.timeline.Remove(id))
+						state.timeline.RemoveFunc(id);
+				}
+
+				state.dirty = true;
+				snprintf(line, sizeof(line), "Deleted %d items", static_cast<int>(doomed.size()));
+				SetStatus(state, now, line);
+			}
+			ui->PopStyleColor(3);
+		}
+
+		// -------------------------------------------------------------------
+		// Func frame
+		// -------------------------------------------------------------------
+		void RenderFuncFrame(IModLoaderImGui* ui, State& state, FuncFrame& frame, double now)
+		{
+			ui->SeparatorText(CC_ICON_BOLT "  Cue");
+
+			if (g_funcNameBufOwner != frame.id)
+			{
+				g_funcNameBufOwner = frame.id;
+				strncpy_s(g_funcNameBuf, sizeof(g_funcNameBuf), frame.name.c_str(), _TRUNCATE);
+			}
+
+			FullWidthItem(ui);
+			if (ui->InputTextWithHint("##funcname", "Cue name (optional)",
+			                          g_funcNameBuf, sizeof(g_funcNameBuf)))
+			{
+				frame.name  = g_funcNameBuf;
+				state.dirty = true;
+			}
+			HelpMarker(ui, "Drawn beside the marker on the track, in place of the action's own "
+			               "short label.");
+
+			bool enabled = frame.enabled;
+			if (ui->Checkbox("Enabled", &enabled))
+			{
+				frame.enabled = enabled;
+				state.dirty   = true;
+			}
+			HelpMarker(ui, "A disabled cue stays on the timeline and never fires.");
+
+			// Seconds, absolute. Unlike a keyframe this is stored rather than
+			// derived, which is why it is an ordinary number field here and a
+			// retime operation over on the track.
+			float seconds = static_cast<float>(frame.time);
+			FullWidthItem(ui);
+			if (ui->DragFloat("##functime", &seconds, 0.05f, 0.0f, 100000.0f, "Fires at  %.2f s"))
+			{
+				frame.time  = std::max(static_cast<double>(seconds), 0.0);
+				state.dirty = true;
+			}
+			HelpMarker(ui, "An absolute position in the take, not a position relative to any "
+			               "keyframe -- retiming the camera move leaves cues where they are.");
+
+			if (frame.time > state.timeline.TotalDuration())
+				ui->TextDisabled("After the end of the shot: this will never fire.");
+
+			ui->Spacing();
+
+			// --- Action -------------------------------------------------------
+			ui->SeparatorText("Action");
+
+			FullWidthItem(ui);
+			if (ui->BeginCombo("##funcaction", FuncActionName(frame.action)))
+			{
+				for (int i = 0; i < static_cast<int>(FuncAction::Count); ++i)
+				{
+					const FuncAction option = static_cast<FuncAction>(i);
+					if (ui->Selectable(FuncActionName(option), option == frame.action))
+					{
+						frame.action = option;
+						state.dirty  = true;
+					}
+				}
+				ui->EndCombo();
+			}
+
+			ui->TextWrapped(FuncActionSummary(frame.action));
+
+			// What scrubbing back over it does, per action rather than as one
+			// general note. Whether a cue can be taken back is the thing you want
+			// to know while choosing it, and for three of the six the answer is
+			// "nothing" -- which is worth saying out loud here instead of being
+			// discovered by dragging.
+			{
+				const FuncAction undo = ReverseOf(frame.action);
+
+				char line[160];
+				if (undo == FuncAction::None)
+				{
+					ui->TextDisabled("Dragging back over this does nothing -- no inverse.");
+					ItemTooltip(ui, "Undoing it would need the value it replaced, or the rupture it "
+					                "ended put back, and a cue carries neither.\n\n"
+					                "An approximate undo that quietly left the world somewhere it "
+					                "had never been would be harder to spot than no undo at all.");
+				}
+				else
+				{
+					snprintf(line, sizeof(line), "Dragging back over this runs %s.",
+					         FuncActionName(undo));
+					ui->TextDisabled(line);
+					ItemTooltip(ui, "Scrubbing the playhead back past this cue runs its inverse, so "
+					                "dragging out over it and back again leaves the world where it "
+					                "started.");
+				}
+			}
+
+			ui->Spacing();
+
+			// Only the parameters this action actually reads. A control that is
+			// on screen but ignored is worse than one that is missing -- it looks
+			// like the cue is configured when it is not.
+			const bool usesType = frame.action == FuncAction::StartRupture ||
+			                      frame.action == FuncAction::SetRupturePhase;
+
+			if (usesType)
+			{
+				LabelRow(ui, "Kind");
+				FullWidthItem(ui);
+				if (ui->BeginCombo("##wavetype", RuptureTypeName(frame.waveType)))
+				{
+					for (int t = 1; t <= 2; ++t)
+					{
+						if (ui->Selectable(RuptureTypeName(t), t == frame.waveType))
+						{
+							frame.waveType = t;
+							state.dirty    = true;
+						}
+					}
+					ui->EndCombo();
+				}
+			}
+
+			if (frame.action == FuncAction::SetRupturePhase)
+			{
+				LabelRow(ui, "Phase");
+				FullWidthItem(ui);
+				if (ui->BeginCombo("##wavestage", RuptureStageName(frame.stage)))
+				{
+					for (int s = 1; s <= 4; ++s)
+					{
+						if (ui->Selectable(RuptureStageName(s), s == frame.stage))
+						{
+							frame.stage = s;
+							state.dirty = true;
+						}
+					}
+					ui->EndCombo();
+				}
+				HelpMarker(ui, "Restarts the running rupture at this stage, keeping the timings "
+				               "it already has.\n\n"
+				               "There has to be one running: the stage durations come from it, "
+				               "and a made-up set would give you a rupture that starts and then "
+				               "never moves.");
+			}
+
+			if (frame.action == FuncAction::SetRuptureProgress)
+			{
+				bool ramp = frame.ramp;
+				if (ui->Checkbox("Ramp over time", &ramp))
+				{
+					frame.ramp  = ramp;
+					state.dirty = true;
+				}
+				HelpMarker(ui, "Off: the rupture jumps to one progress value the moment the "
+				               "playhead reaches this cue.\n\n"
+				               "On: it is driven smoothly from the start value to the end value "
+				               "over the duration below, so the rupture crosses the map at a pace "
+				               "you choose rather than the world's.\n\n"
+				               "A ramp is the one cue that is not an instant. It follows the "
+				               "playhead rather than firing as it passes, so scrubbing into the "
+				               "middle of one puts the rupture exactly where that moment says it "
+				               "should be.");
+
+				float start = Clamp(frame.progress, 0.0f, 1.0f) * 100.0f;
+				FullWidthItem(ui);
+				if (ui->SliderFloat("##waveprogress", &start, 0.0f, 100.0f,
+				                    frame.ramp ? "Start  %.0f%%" : "Progress  %.0f%%"))
+				{
+					frame.progress = Clamp(start / 100.0f, 0.0f, 1.0f);
+					state.dirty    = true;
+				}
+
+				if (frame.ramp)
+				{
+					float end = Clamp(frame.progressEnd, 0.0f, 1.0f) * 100.0f;
+					FullWidthItem(ui);
+					if (ui->SliderFloat("##waveprogressend", &end, 0.0f, 100.0f, "End  %.0f%%"))
+					{
+						frame.progressEnd = Clamp(end / 100.0f, 0.0f, 1.0f);
+						state.dirty       = true;
+					}
+					HelpMarker(ui, "End below start runs the rupture backwards across its stage, "
+					               "which the game is perfectly willing to do.");
+
+					float seconds = static_cast<float>(frame.rampDuration);
+					FullWidthItem(ui);
+					if (ui->DragFloat("##waverampdur", &seconds, 0.05f, 0.05f, 600.0f,
+					                  "Over  %.2f s"))
+					{
+						frame.rampDuration = std::max(static_cast<double>(seconds), 0.05);
+						state.dirty        = true;
+					}
+					HelpMarker(ui, "How long the ramp takes. It is drawn on the track as a bar "
+					               "running right from the cue's marker, so you can line it up "
+					               "against the camera move it is meant to happen under.");
+
+					char span[96];
+					snprintf(span, sizeof(span), "Runs %.2f s  ->  %.2f s",
+					         frame.time, frame.time + frame.rampDuration);
+					ui->TextDisabled(span);
+				}
+				else
+				{
+					HelpMarker(ui, "How far through its current stage the rupture is jumped to, so "
+					               "a shot does not have to wait for it to arrive.");
+				}
+			}
+
+			ui->Spacing();
+			ui->Separator();
+			ui->Spacing();
+
+			// --- Actions --------------------------------------------------------
+			float availX = 0.0f, availY = 0.0f;
+			ui->GetContentRegionAvail(&availX, &availY);
+			const float rowHeight = ui->GetFrameHeight() * 1.15f;
+
+			if (AccentButton(ui, CC_ICON_BOLT "  Trigger now", availX, rowHeight))
+				Post(state, Request::FireSelectedFunc);
+			ItemTooltip(ui, "Runs this cue against the world immediately, so it can be tried "
+			                "without recording a take.\n\n"
+			                "It changes the actual save you are playing -- there is no undo for a "
+			                "rupture.");
+
+			ui->TextDisabled("Cues fire whenever the playhead moves forward over them.");
+			HelpMarker(ui, "During a take, during preview play, and while you scrub -- so the "
+			               "world keeps up with wherever you have dragged the playhead to.\n\n"
+			               "Scrubbing backwards runs each cue's inverse where it has one, so "
+			               "dragging out over a cue and back again leaves the world where it "
+			               "started.\n\n"
+			               "Untick Enabled above to work on the camera timing without it, or use "
+			               "Trigger now to fire this one on its own.\n\n"
+			               "They also need you to be the one running the world -- single player or "
+			               "hosting. As a connected client the server decides, and the cue may "
+			               "report success while nothing happens.");
+
+			ui->Spacing();
+
+			ui->PushStyleColor(Col_Button,        kDanger.r * 0.6f, kDanger.g * 0.6f, kDanger.b * 0.6f, 1.0f);
+			ui->PushStyleColor(Col_ButtonHovered, kDanger.r, kDanger.g, kDanger.b, 1.0f);
+			ui->PushStyleColor(Col_ButtonActive,  kDanger.r, kDanger.g, kDanger.b, 1.0f);
+			if (ui->ButtonSized(CC_ICON_DELETE "  Delete cue", availX, rowHeight))
+			{
+				const uint32_t doomed = frame.id;
+				ClearSelection(state);
+				state.timeline.RemoveFunc(doomed);
+				state.dirty = true;
+				SetStatus(state, now, "Cue deleted");
 			}
 			ui->PopStyleColor(3);
 		}
@@ -447,7 +869,7 @@ namespace CameraControls::UI::Properties
 			if (AccentButton(ui, CC_ICON_PLAYLIST_ADD "  Insert here from camera",
 			                 availX, rowHeight))
 			{
-				state.selectedId = key.id;
+				SelectOnly(state, key.id);
 				Post(state, Request::CaptureInsertAfterSelected);
 			}
 			ItemTooltip(ui, "Splits this segment in two at the current camera pose, without "
@@ -456,8 +878,7 @@ namespace CameraControls::UI::Properties
 			if (ui->ButtonSized(CC_ICON_TARGET "  Select the keyframe that starts it",
 			                    availX, rowHeight))
 			{
-				state.selection  = Selection::Keyframe;
-				state.selectedId = key.id;
+				SelectOnly(state, key.id);
 			}
 		}
 
@@ -484,8 +905,16 @@ namespace CameraControls::UI::Properties
 			}
 
 			char line[160];
-			snprintf(line, sizeof(line), "%d keyframes   %.2f s total",
-			         timeline.Count(), timeline.TotalDuration());
+			if (timeline.FuncCount() > 0)
+			{
+				snprintf(line, sizeof(line), "%d keyframes   %d cues   %.2f s total",
+				         timeline.Count(), timeline.FuncCount(), timeline.TotalDuration());
+			}
+			else
+			{
+				snprintf(line, sizeof(line), "%d keyframes   %.2f s total",
+				         timeline.Count(), timeline.TotalDuration());
+			}
 			ui->TextDisabled(line);
 
 			if (state.dirty)
@@ -522,8 +951,7 @@ namespace CameraControls::UI::Properties
 			{
 				timeline.Clear();
 				timeline.name       = "Untitled";
-				state.selectedId    = 0;
-				state.selection     = Selection::None;
+				ClearSelection(state);
 				state.playhead      = 0.0;
 				state.playing       = false;
 				state.dirty         = false;
@@ -566,13 +994,13 @@ namespace CameraControls::UI::Properties
 				if (ProjectIO::Load(g_projectList[g_selectedProject], loaded, error))
 				{
 					timeline            = std::move(loaded);
-					state.selectedId    = 0;
-					state.selection     = Selection::None;
+					ClearSelection(state);
 					state.playhead      = 0.0;
 					state.playing       = false;
 					state.dirty         = false;
 					g_projectNameSynced = false;
 					g_keyNameBufOwner   = 0;
+					g_funcNameBufOwner  = 0;
 					g_ioMessage         = "Loaded " + timeline.name;
 					g_ioMessageIsError  = false;
 					SetStatus(state, now, g_ioMessage.c_str());
@@ -772,8 +1200,13 @@ namespace CameraControls::UI::Properties
 			               "landscape shots, down when working inside a building.");
 
 			FullWidthItem(ui);
-			ui->SliderFloat("##flyspeed", &state.options.flySpeed, 100.0f, 12000.0f,
+			ui->SliderFloat("##flyspeed", &state.options.flySpeed, kFlySpeedMin, kFlySpeedMax,
 			                "Fly speed  %.0f u/s");
+			HelpMarker(ui, "How fast the free camera flies at 1x, before the boost and crawl "
+			               "modifiers.\n\n"
+			               "Quicker to reach with the scroll wheel while holding right mouse to "
+			               "look around -- this slider and the wheel are the same setting, and it "
+			               "is saved when you leave the editor.");
 
 			FullWidthItem(ui);
 			ui->SliderFloat("##sensitivity", &state.options.mouseSensitivity, 0.02f, 1.5f,
@@ -878,6 +1311,7 @@ namespace CameraControls::UI::Properties
 	void Reset()
 	{
 		g_keyNameBufOwner   = 0;
+		g_funcNameBufOwner  = 0;
 		g_projectNameSynced = false;
 		g_projectListStale  = true;
 		g_selectedProject   = -1;
@@ -898,11 +1332,42 @@ namespace CameraControls::UI::Properties
 
 			// Root crumb: always live, and always takes you home.
 			if (ui->Button("Project"))
-			{
-				state.selection  = Selection::None;
-				state.selectedId = 0;
-			}
+				ClearSelection(state);
 			ItemTooltip(ui, "Back to the project: name, length, save and load");
+
+			if (!state.multiSelection.empty())
+			{
+				ui->SameLine(0.0f, 6.0f);
+				ui->TextDisabled(">");
+				ui->SameLine(0.0f, 6.0f);
+
+				char crumb[64];
+				snprintf(crumb, sizeof(crumb), "%d selected",
+				         static_cast<int>(state.multiSelection.size()));
+				ui->TextDisabled(crumb);
+
+				ui->Separator();
+				return;
+			}
+
+			// A func frame is not in the keyframe list, so it gets its own crumb
+			// rather than falling through the index lookup below.
+			if (state.selection == Selection::Function)
+			{
+				if (const FuncFrame* frame = state.timeline.FindFunc(state.selectedId))
+				{
+					ui->SameLine(0.0f, 6.0f);
+					ui->TextDisabled(">");
+					ui->SameLine(0.0f, 6.0f);
+
+					char crumb[96];
+					snprintf(crumb, sizeof(crumb), "Cue  %s", FuncActionName(frame->action));
+					ui->TextDisabled(crumb);
+				}
+
+				ui->Separator();
+				return;
+			}
 
 			if (state.selection == Selection::None || index < 0)
 			{
@@ -967,6 +1432,14 @@ namespace CameraControls::UI::Properties
 	{
 		RenderBreadcrumb(ui, state);
 
+		// Before the per-kind panels: with several things selected there is no
+		// single "the keyframe" for them to edit.
+		if (!state.multiSelection.empty())
+		{
+			RenderMultiSelection(ui, state, now);
+			return;
+		}
+
 		switch (state.selection)
 		{
 			case Selection::Keyframe:
@@ -986,6 +1459,16 @@ namespace CameraControls::UI::Properties
 				if (index >= 0 && index + 1 < state.timeline.Count())
 				{
 					RenderSegment(ui, state, index);
+					return;
+				}
+				break;
+			}
+
+			case Selection::Function:
+			{
+				if (FuncFrame* frame = state.timeline.FindFunc(state.selectedId))
+				{
+					RenderFuncFrame(ui, state, *frame, now);
 					return;
 				}
 				break;

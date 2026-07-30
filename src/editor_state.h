@@ -48,6 +48,11 @@ namespace CameraControls
 		SnapCameraToPlayhead,      // fly camera jumps to the evaluated pose
 		LookAtSelectionFromCamera, // set the selected key's look-at to the camera's aim
 
+		// Run the selected func frame right now. Queued rather than done in the
+		// inspector because a func frame changes the *world*, and the inspector
+		// is on the render thread.
+		FireSelectedFunc,
+
 		// Log a full control_probe snapshot. Queued rather than done in the
 		// keybind callback because the probe reads UObjects and keybinds arrive on
 		// the modloader's WndProc thread. Handled before the tick's mode gate, so
@@ -61,7 +66,13 @@ namespace CameraControls
 		None = 0,
 		Keyframe,
 		Segment,   // the gap between the selected key and the next one
-		Timeline   // project-wide settings
+		Timeline,  // project-wide settings
+
+		// A func frame. Named Function rather than FuncFrame so it does not read
+		// as the FuncFrame struct at a glance -- `selectedId` means a different
+		// lookup depending on which of these is set, and that is exactly the
+		// place a misread costs something.
+		Function
 	};
 
 	struct FlyInput
@@ -113,6 +124,16 @@ namespace CameraControls
 		double   distance = 0.0;   // camera to keyframe, for handle sizing
 	};
 
+	// Bounds on the fly speed, shared by the inspector's slider and the
+	// mouse-wheel adjustment so the two cannot drift apart -- a wheel that can
+	// push the speed past the end of its own slider looks broken from both ends.
+	//
+	// Narrower than the ini's own 50..20000 range on purpose: those are the limits
+	// on what someone may deliberately write in a config file, these are the
+	// limits on what a control should hand out by accident.
+	inline constexpr float kFlySpeedMin = 100.0f;
+	inline constexpr float kFlySpeedMax = 12000.0f;
+
 	struct Options
 	{
 		bool  fitViewport          = true;   // shrink the game view out from under the panels
@@ -144,7 +165,7 @@ namespace CameraControls
 		bool  scrubPreview         = true;   // camera follows the playhead
 		float countdownSeconds     = 3.0f;   // pre-roll before playback starts
 		float mouseSensitivity     = 0.25f;
-		float flySpeed             = 1200.0f;// uu/s at 1x
+		float flySpeed             = 1200.0f;// uu/s at 1x -- see kFlySpeed{Min,Max}
 		int   splineSamples        = 16;     // path samples per segment
 		float gizmoScale           = 3.0f;   // keyframe camera icon size multiplier
 		float gizmoNearCull        = 150.0f; // hide gizmo lines closer than this to the camera
@@ -171,9 +192,30 @@ namespace CameraControls
 		Selection selection   = Selection::None;
 		uint32_t  selectedId  = 0;
 
+		// Everything selected when Ctrl+clicking has gathered more than one thing,
+		// keyframes and cues mixed freely -- they share an id space, so one list
+		// covers both and an id can only ever mean one of them.
+		//
+		// Invariant: either empty, or holding *at least two* ids, one of which is
+		// `selectedId`. Never one. A single-item multi-selection would be a second
+		// representation of the state `selectedId` already describes, and every
+		// piece of code downstream would then have to handle both -- so the toggle
+		// collapses back to a plain selection the moment it drops to one.
+		std::vector<uint32_t> multiSelection;
+
 		// --- Transport -------------------------------------------------------
 		double playhead  = 0.0;
 		bool   playing   = false;
+
+		// Set by the timeline when the *user* dragged the playhead, and consumed
+		// (and cleared) by the game thread on its next tick.
+		//
+		// Cues fire on a forward scrub, and this is what separates a scrub from
+		// every other way the playhead moves while stopped. Selecting the next
+		// keyframe with `.`, flying to one, or stopping a take all reposition it
+		// too -- and firing every cue in between because somebody changed the
+		// selection would be a surprise with no undo behind it.
+		bool   playheadScrubbed = false;
 
 		// Counts down before Playback actually starts rolling. > 0 means the
 		// pre-roll overlay is on screen and the playhead is parked at 0.
@@ -182,6 +224,12 @@ namespace CameraControls
 		// --- Live camera (game thread writes, UI reads) ----------------------
 		CameraPose flyPose;
 		bool       rigActive = false;   // the camera actor exists and owns the view
+
+		// Whether the FOV we ask for is actually being rendered. False means the
+		// game's camera manager is overriding it and `fov_override` could not arm,
+		// which the inspector says out loud -- a FOV slider that edits the keyframe
+		// but never changes the picture is exactly the bug that module exists for.
+		bool       fovLive   = false;
 
 		// The view the engine is *actually* rendering, read back from the
 		// camera manager every tick.
@@ -219,6 +267,15 @@ namespace CameraControls
 		// Written by the render thread; the game thread reads it to decide
 		// whether a right-mouse press starts a look-drag or belongs to the UI.
 		bool uiHovered = false;
+
+		// True while a right-mouse look-drag owns the camera.
+		//
+		// Lives here rather than as a static in `input_binds` because three threads
+		// want it: the loader's input thread sets it, the game thread's mouse pump
+		// consumes it, and the render thread reads it to route the scroll wheel to
+		// the fly speed instead of to the timeline's zoom. The mutex was already
+		// covering every one of those accesses, so this is the honest home for it.
+		bool lookActive = false;
 
 		// Set while the editor windows are collapsed to the overlay only.
 		bool uiHidden = false;
@@ -261,6 +318,30 @@ namespace CameraControls
 
 	// Queues a request for the game thread. Caller must already hold the lock.
 	void Post(State& state, Request request);
+
+	// --- Selection ---------------------------------------------------------
+	// All of these take the already-locked State; none of them touch the SDK, so
+	// the timeline widget drives them straight from the render thread.
+
+	// The kind of thing `id` names, derived from the timeline rather than
+	// remembered -- an id is a keyframe or a cue and cannot be both.
+	Selection KindOf(const State& state, uint32_t id);
+
+	// Is `id` part of the current selection, single or multi?
+	bool IsSelected(const State& state, uint32_t id);
+
+	// Plain click: `id` alone, and any multi-selection is dropped.
+	void SelectOnly(State& state, uint32_t id);
+
+	// Ctrl+click: adds `id` if it is not already in, removes it if it is.
+	//
+	// Seeds from the current single selection on the first Ctrl+click, so
+	// clicking one thing and Ctrl+clicking a second gives you two rather than
+	// silently discarding the first.
+	void ToggleSelection(State& state, uint32_t id);
+
+	// Drops everything. Used by delete, load, new project and Escape.
+	void ClearSelection(State& state);
 
 	// Sets the transient status line. Caller must already hold the lock.
 	// `now` is the plugin's monotonic clock (seconds).

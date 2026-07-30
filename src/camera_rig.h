@@ -4,9 +4,13 @@
 // The camera the plugin drives.
 //
 // A plain ACameraActor is spawned and made the local player's view target;
-// every tick its transform and its UCameraComponent's FOV are written from the
-// pose the editor produced. Nothing hooks the player camera manager, so
-// tearing down is just "put the old view target back and destroy the actor".
+// every tick its transform is written from the pose the editor produced. Tearing
+// down is mostly just "put the old view target back and destroy the actor".
+//
+// FOV is the exception and does not work that way: this game's camera manager
+// overwrites `POV.FOV` every frame, so the pose's FOV goes through
+// `fov_override` instead. See that header -- it is the reason the FOV controls
+// used to do nothing at all.
 //
 // GAME THREAD ONLY. Every function here touches UObjects.
 // ---------------------------------------------------------------------------
@@ -106,6 +110,17 @@ namespace CameraControls::Rig
 
 	// Writes a pose onto the camera actor. No-op while inactive.
 	void ApplyPose(const CameraPose& pose);
+
+	// Whether the FOV the editor asks for is reaching the screen.
+	//
+	// Setting the camera component's FOV is not enough on this game: the player
+	// camera manager overwrites `POV.FOV` with its own value every frame, so the
+	// FOV slider, the zoom keys and keyframe FOV were all completely inert while
+	// the gizmos and read-outs -- which come from our own numbers -- moved fine.
+	// `fov_override` is the repair; this is false when its offset probe declined
+	// to arm, so the UI can say the FOV controls are dead instead of leaving the
+	// user to work it out from a slider that moves nothing.
+	bool FovIsLive();
 
 	// The local player's current point of view, used to seed the fly camera
 	// when the editor opens so it starts exactly where the player was looking.

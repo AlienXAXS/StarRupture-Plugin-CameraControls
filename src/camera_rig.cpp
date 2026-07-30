@@ -1,5 +1,6 @@
 #include "camera_rig.h"
 #include "control_probe.h"
+#include "fov_override.h"
 #include "plugin_config.h"
 #include "plugin_helpers.h"
 
@@ -203,6 +204,46 @@ namespace CameraControls::Rig
 			return t;
 		}
 
+		// Depth of field, via the camera component's own post-process settings.
+		//
+		// Unlike FOV, this route works: `ULocalPlayer::GetViewPoint` copies the
+		// camera cache's whole `FPostProcessSettings` into the view info verbatim
+		// (`FPostProcessSettings::operator=` at 0x144CA5052) and
+		// `AAuPlayerCameraManager::UpdateViewTarget` only ever writes `POV.FOV`, so
+		// nothing between our component and the scene view touches these. The
+		// camera's settings are also applied *after* post-process volumes, so a
+		// volume in the level cannot win against them.
+		//
+		// Only the two fields the editor animates are overridden. Everything else --
+		// sensor width, blade count, the game's whole look -- is deliberately left
+		// alone: an override bit we set is a decision taken away from the game's
+		// artists, and `DepthOfFieldSensorWidth` in particular changes how strong
+		// the blur reads for a *given* f-stop, so overriding it would make the
+		// aperture number mean something different here than it does in the game.
+		void ApplyDepthOfField(SDK::UCameraComponent* camera, const CameraPose& pose)
+		{
+			SDK::FPostProcessSettings& pp = camera->PostProcessSettings;
+
+			if (!pose.depthOfField)
+			{
+				// Clearing the override bits hands the look back to whatever the
+				// game and its volumes were doing, which is what "off" has to mean.
+				pp.bOverride_DepthOfFieldFocalDistance = 0;
+				pp.bOverride_DepthOfFieldFstop         = 0;
+				return;
+			}
+
+			// The blend weight gates the whole block; an ACameraActor ships with 1,
+			// but it is Interp'd and therefore something the engine may touch.
+			camera->PostProcessBlendWeight = 1.0f;
+
+			pp.bOverride_DepthOfFieldFocalDistance = 1;
+			pp.DepthOfFieldFocalDistance = Clamp(pose.focusDistance, 1.0f, 1000000.0f);
+
+			pp.bOverride_DepthOfFieldFstop = 1;
+			pp.DepthOfFieldFstop = Clamp(pose.aperture, 0.5f, 32.0f);
+		}
+
 		// Drops the camera actor without touching the input-restore state.
 		//
 		// The distinction matters: `Deactivate` runs *before* the input restore in the
@@ -222,6 +263,7 @@ namespace CameraControls::Rig
 	void ForgetWorldState()
 	{
 		DropCameraPointers();
+		FovOverride::ForgetWorldState();
 
 		// Disarm the input watchdog too. On a world teardown the pawn, its hero
 		// component and the mapping contexts are all going away, and re-binding
@@ -229,6 +271,8 @@ namespace CameraControls::Rig
 		g_inputVerifyTicks   = 0;
 		g_mappingsAtActivate = -1;
 	}
+
+	bool FovIsLive() { return FovOverride::IsEngaged(); }
 
 	bool GetPlayerViewpoint(CameraPose& outPose)
 	{
@@ -453,6 +497,20 @@ namespace CameraControls::Rig
 				SDK::EViewTargetBlendFunction::VTBlend_Linear, 0.0f, false);
 
 			g_active = true;
+
+			// Deliberately the *last* thing, after `g_active`, and this ordering is
+			// load-bearing. Engaging the FOV override writes a field on the game's
+			// camera manager that outlives our camera actor, and the only thing that
+			// puts it back is `Deactivate` -- which returns early unless `g_active`.
+			// Arming it any earlier means a throw in between leaves the player's FOV
+			// bent with the snapshot thrown away, and nothing in the session able to
+			// restore it. The first pose above therefore renders at the game's own
+			// FOV, which is what `startPose` was read from anyway.
+			//
+			// A failure here is not fatal: the camera flies either way, it just
+			// cannot zoom, and `State::fovLive` is how the UI says so.
+			FovOverride::Engage();
+
 			LOG_INFO("Rig: camera actor spawned and view target acquired");
 			return true;
 		}
@@ -485,6 +543,11 @@ namespace CameraControls::Rig
 		// Camera pointers only: the input-restore state has to survive, because
 		// RestorePlayerInputConfigs runs after this and needs it.
 		DropCameraPointers();
+
+		// Hand the game's own FOV back before anything else: it is the one thing we
+		// changed that survives the camera actor being destroyed, so leaving it
+		// written would follow the player out of the editor.
+		FovOverride::Release();
 
 		try
 		{
@@ -757,8 +820,18 @@ namespace CameraControls::Rig
 				ToSDK(pose.location), ToSDK(pose.rotation),
 				/*bSweep=*/false, &hit, /*bTeleport=*/true);
 
+			// Kept even though the game overwrites it a call later: it is what a
+			// camera actor is *supposed* to answer with, it is what the projection
+			// falls back to if the override ever cannot arm, and it costs one
+			// setter. FovOverride is what actually puts the angle on screen -- see
+			// its header for why this line alone was doing nothing at all.
 			if (g_camera->CameraComponent)
+			{
 				g_camera->CameraComponent->SetFieldOfView(Clamp(pose.fov, 5.0f, 170.0f));
+				ApplyDepthOfField(g_camera->CameraComponent, pose);
+			}
+
+			FovOverride::Apply(pose.fov);
 		}
 		catch (...)
 		{

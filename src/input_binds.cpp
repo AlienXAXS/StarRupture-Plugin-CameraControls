@@ -77,7 +77,18 @@ namespace CameraControls::Input
 			{ Action::ResetRotation,   "ResetRotation",   "X",           false },
 
 			{ Action::CaptureKeyframe, "CaptureKeyframe", "K",           false },
-			{ Action::InsertKeyframe,  "InsertKeyframe",  "Shift+K",     false },
+
+			// "I", not the more obvious "Shift+K". Shift and Ctrl are the boost and
+			// crawl modifiers, so *any* Shift+ or Ctrl+ default collides with
+			// ordinary flying: the hand holding Shift to cover ground is the one
+			// reaching for K, and every keyframe taken at speed came out as an
+			// insert rather than an append (and, with nothing selected, an insert at
+			// the *front* of the timeline). Modifier shadowing below stops that
+			// being two keyframes; only a plain key stops it being the wrong one.
+			//
+			// Existing installs keep whatever their ini already says -- the schema
+			// only supplies a default for a key that is absent.
+			{ Action::InsertKeyframe,  "InsertKeyframe",  "I",           false },
 			{ Action::UpdateKeyframe,  "UpdateKeyframe",  "U",           false },
 			{ Action::GotoKeyframe,    "GotoKeyframe",    "G",           false },
 			{ Action::DeleteKeyframe,  "DeleteKeyframe",  "Delete",      false },
@@ -92,7 +103,10 @@ namespace CameraControls::Input
 		bool        g_held[static_cast<int>(Action::Count)] = {};
 
 		// --- Mouse look ------------------------------------------------------
-		bool  g_looking     = false;   // right button held and the drag owns the camera
+		//
+		// Whether the drag owns the camera is `State::lookActive`, not a static here:
+		// the render thread needs it too, to send the scroll wheel to the fly speed
+		// while looking. Every access to it was already inside the state lock.
 		POINT g_lookAnchor  = {};      // screen position the cursor is pinned to
 		HWND  g_gameWindow  = nullptr;
 
@@ -113,9 +127,124 @@ namespace CameraControls::Input
 		int g_boostVK = 0;
 		int g_crawlVK = 0;
 
-		// PumpModifierKeys runs every tick, so it may only log on a change.
-		bool g_lastBoost = false;
-		bool g_lastCrawl = false;
+		// --- Modifier shadowing ---------------------------------------------
+		//
+		// THE BUG: holding Shift to fly fast and tapping K added *two* keyframes.
+		//
+		// The loader dispatches a plain named bind whenever its key transitions,
+		// whatever modifiers happen to be held (`keybind_registry.cpp`):
+		//
+		//     if (!(it->mods == EModKeyMod_None || it->mods == mods)) continue;
+		//
+		// That is right over there, and load-bearing: it is what keeps W/A/S/D
+		// working while Shift is held for boost. But it means a plugin registering
+		// both "K" and "Shift+K" gets *both* callbacks from one Shift+K press. Ours
+		// does, and the two raise different requests -- append and insert -- so
+		// `Post`'s duplicate collapsing, which only merges identical ones, let both
+		// through and two keyframes appeared.
+		//
+		// So the plain bind stands down when a combo on the same base key is what
+		// the user actually pressed. Derived from the *resolved* names rather than
+		// hard-coded against K, so it keeps holding after a rebind and covers any
+		// future pair.
+		constexpr unsigned kModShift = 1u << 0;
+		constexpr unsigned kModCtrl  = 1u << 1;
+		constexpr unsigned kModAlt   = 1u << 2;
+
+		struct BindShape
+		{
+			std::string baseKey;    // the bind name with modifier tokens stripped
+			unsigned    mods = 0;
+		};
+
+		BindShape g_shapes[kBindCount];
+
+		bool NamesEqual(const std::string& a, const std::string& b)
+		{
+			return a.size() == b.size() &&
+			       _stricmp(a.c_str(), b.c_str()) == 0;
+		}
+
+		// Splits "Shift+K" into { "K", kModShift }. Mirrors the loader's own
+		// `ParseComboString` -- same separator, same tokens, same case-insensitivity
+		// -- because the two have to agree about what a name means or the
+		// suppression will not line up with the dispatch it is compensating for.
+		BindShape ParseBindName(const std::string& name)
+		{
+			BindShape shape;
+
+			size_t start = 0;
+			while (start <= name.size())
+			{
+				const size_t plus  = name.find('+', start);
+				const size_t end   = (plus == std::string::npos) ? name.size() : plus;
+				const std::string token = name.substr(start, end - start);
+
+				if (NamesEqual(token, "ctrl") || NamesEqual(token, "control"))
+					shape.mods |= kModCtrl;
+				else if (NamesEqual(token, "shift"))
+					shape.mods |= kModShift;
+				else if (NamesEqual(token, "alt"))
+					shape.mods |= kModAlt;
+				else if (!token.empty())
+					shape.baseKey = token;
+
+				if (plus == std::string::npos)
+					break;
+				start = plus + 1;
+			}
+
+			return shape;
+		}
+
+		// The loader's `SampleCurrentModifiers`, reproduced exactly: same API, same
+		// sided virtual codes. A disagreement here would suppress a plain bind on a
+		// frame where the combo does not fire either, and the keypress would vanish.
+		unsigned HeldModifiers()
+		{
+			unsigned mods = 0;
+			if ((GetAsyncKeyState(VK_LCONTROL) | GetAsyncKeyState(VK_RCONTROL)) & 0x8000)
+				mods |= kModCtrl;
+			if ((GetAsyncKeyState(VK_LSHIFT) | GetAsyncKeyState(VK_RSHIFT)) & 0x8000)
+				mods |= kModShift;
+			if ((GetAsyncKeyState(VK_LMENU) | GetAsyncKeyState(VK_RMENU)) & 0x8000)
+				mods |= kModAlt;
+			return mods;
+		}
+
+		// True when `index` is a plain bind and some other bind is a combo on the
+		// same key that the loader is dispatching right now.
+		//
+		// The modifier test is *equality*, not "contains", because the loader
+		// requires an exact match for a combo entry (`it->mods == mods`). Holding
+		// Ctrl+Shift+K fires neither "Shift+K" nor anything else with mods, only
+		// the plain "K" -- so suppressing on a subset match would swallow the press
+		// entirely and leave the key doing nothing at all.
+		bool ShadowedByCombo(int index)
+		{
+			const BindShape& mine = g_shapes[index];
+			if (mine.mods != 0 || mine.baseKey.empty())
+				return false;
+
+			const unsigned held = HeldModifiers();
+			if (held == 0)
+				return false;
+
+			for (int i = 0; i < kBindCount; ++i)
+			{
+				if (i == index)
+					continue;
+
+				const BindShape& other = g_shapes[i];
+				if (other.mods == 0 || other.mods != held)
+					continue;
+
+				if (NamesEqual(other.baseKey, mine.baseKey))
+					return true;
+			}
+
+			return false;
+		}
 
 		int ModifierVKForName(const std::string& name)
 		{
@@ -187,9 +316,8 @@ namespace CameraControls::Input
 
 			index = Clamp(index + direction, 0, static_cast<int>(keys.size()) - 1);
 
-			state.selectedId = keys[index].id;
-			state.selection  = Selection::Keyframe;
-			state.playhead   = state.timeline.AbsoluteTime(index);
+			SelectOnly(state, keys[index].id);
+			state.playhead = state.timeline.AbsoluteTime(index);
 		}
 
 		void HandlePress(Action action)
@@ -239,8 +367,7 @@ namespace CameraControls::Input
 						// an empty stretch of track to click, which on a full
 						// timeline may not exist at all.
 						LOG_TRACE("Input: escape cleared the selection");
-						state.selection  = Selection::None;
-						state.selectedId = 0;
+						ClearSelection(state);
 						SetStatus(state, now, "Selection cleared");
 					}
 					return;
@@ -302,15 +429,51 @@ namespace CameraControls::Input
 					Post(state, Request::GotoSelected);
 					break;
 
+				// Deletes whatever is selected, keyframe or cue. Keyframes and
+				// func frames share one id counter, so a single id can only ever
+				// name one of them and the two Remove calls cannot both hit.
 				case Action::DeleteKeyframe:
-					if (state.selectedId != 0 && state.timeline.Remove(state.selectedId))
+				{
+					// A Ctrl+click group goes in one press. Copied out first,
+					// because ClearSelection empties the very vector this would
+					// otherwise be iterating.
+					if (!state.multiSelection.empty())
 					{
-						state.selectedId = 0;
-						state.selection  = Selection::None;
-						state.dirty      = true;
+						const std::vector<uint32_t> doomed = state.multiSelection;
+						ClearSelection(state);
+
+						for (uint32_t id : doomed)
+						{
+							if (!state.timeline.Remove(id))
+								state.timeline.RemoveFunc(id);
+						}
+
+						state.dirty = true;
+
+						char message[64];
+						snprintf(message, sizeof(message), "Deleted %d items",
+						         static_cast<int>(doomed.size()));
+						SetStatus(state, now, message);
+						break;
+					}
+
+					if (state.selectedId == 0)
+						break;
+
+					if (state.timeline.Remove(state.selectedId))
+					{
+						ClearSelection(state);
+						state.dirty = true;
 						SetStatus(state, now, "Keyframe deleted");
 					}
+					else if (state.timeline.RemoveFunc(state.selectedId))
+					{
+						ClearSelection(state);
+						state.dirty = true;
+						SetStatus(state, now, "Cue deleted");
+					}
 					break;
+				}
 
 				case Action::PrevKeyframe: SelectNeighbour(state, -1); break;
 				case Action::NextKeyframe: SelectNeighbour(state, +1); break;
@@ -341,6 +504,13 @@ namespace CameraControls::Input
 		{
 			static_assert(Index >= 0 && Index < kBindCount, "bind index out of range");
 			const BindDef& def = kBinds[Index];
+
+			// Both edges, not just the press. Letting a release through that its
+			// press never got would clear a held flag that was never set -- harmless
+			// today, but only by accident, and the pair staying symmetrical is what
+			// makes that true rather than lucky.
+			if (ShadowedByCombo(Index))
+				return;
 
 			if (def.wantsRelease)
 			{
@@ -377,16 +547,16 @@ namespace CameraControls::Input
 				// the UI -- dragging a slider must not also spin the camera.
 				if (state.mode == Mode::Editor && !state.uiHovered)
 				{
-					g_looking = true;
+					state.lookActive = true;
 					LOG_TRACE("Input: mouse-look started");
 				}
 				return;
 			}
 
-			if (g_looking)
+			if (state.lookActive)
 				LOG_TRACE("Input: mouse-look ended");
 
-			g_looking = false;
+			state.lookActive = false;
 		}
 	}
 
@@ -430,10 +600,8 @@ namespace CameraControls::Input
 		for (bool& held : g_held)
 			held = false;
 
-		g_looking    = false;
-		g_lookAnchor = POINT{};
-		g_lastBoost  = false;
-		g_lastCrawl  = false;
+		state.lookActive = false;
+		g_lookAnchor     = POINT{};
 
 		state.flyInput.ClearAll();
 	}
@@ -487,12 +655,39 @@ namespace CameraControls::Input
 
 		auto* input = self->hooks->Input;
 
+		// Resolve every name first, then register. The shadow test compares each
+		// bind against all the others, so it needs the whole table settled before
+		// the first callback can possibly fire.
 		for (int i = 0; i < kBindCount; ++i)
 		{
 			char buffer[64] = {};
 			g_resolvedNames[i] = CameraControlsConfig::Config::GetKeybind(
 				kBinds[i].configKey, kBinds[i].fallback, buffer, sizeof(buffer));
+			g_shapes[i] = ParseBindName(g_resolvedNames[i]);
+		}
 
+		// Say which pairs collide, once, at startup. A user who has rebound
+		// something into a collision gets told here rather than by counting the
+		// keyframes that appear.
+		for (int i = 0; i < kBindCount; ++i)
+		{
+			if (g_shapes[i].mods == 0)
+				continue;
+
+			for (int j = 0; j < kBindCount; ++j)
+			{
+				if (g_shapes[j].mods != 0 || !NamesEqual(g_shapes[j].baseKey, g_shapes[i].baseKey))
+					continue;
+
+				LOG_DEBUG("Input: '%s' (%s) shadows '%s' (%s) -- the plain bind stands down "
+				          "while those modifiers are held",
+				          g_resolvedNames[i].c_str(), kBinds[i].configKey,
+				          g_resolvedNames[j].c_str(), kBinds[j].configKey);
+			}
+		}
+
+		for (int i = 0; i < kBindCount; ++i)
+		{
 			// Boost and crawl get polled from the OS instead of dispatched, if
 			// they are still pointed at a modifier key. Recorded here, where the
 			// resolved name is, and logged so the log says which path a given
@@ -565,20 +760,6 @@ namespace CameraControls::Input
 		const bool boost = KeyIsDown(g_boostVK);
 		const bool crawl = KeyIsDown(g_crawlVK);
 
-		// Edge-triggered: this runs 60 times a second and the user asked to see
-		// these in the log, which only works if they are not also the loudest
-		// thing in it.
-		if (boost != g_lastBoost)
-		{
-			g_lastBoost = boost;
-			LOG_TRACE("Input: boost (vk 0x%02X) %s", g_boostVK, boost ? "down" : "up");
-		}
-		if (crawl != g_lastCrawl)
-		{
-			g_lastCrawl = crawl;
-			LOG_TRACE("Input: crawl (vk 0x%02X) %s", g_crawlVK, crawl ? "down" : "up");
-		}
-
 		auto lock = Lock();
 		State& state = Get();
 
@@ -590,6 +771,14 @@ namespace CameraControls::Input
 		RecomputeAxes(state);
 	}
 
+	bool CtrlHeld()
+	{
+		// Deliberately the same expression HeldModifiers uses for kModCtrl rather
+		// than a fresh reading of "is Ctrl down" -- sided VKs and all. There is no
+		// second convention for what Ctrl means in this plugin.
+		return ((GetAsyncKeyState(VK_LCONTROL) | GetAsyncKeyState(VK_RCONTROL)) & 0x8000) != 0;
+	}
+
 	void PumpMouseLook()
 	{
 		// Same thread, same place in the tick, and it takes the lock the same way.
@@ -598,11 +787,26 @@ namespace CameraControls::Input
 		float sensitivity = 0.25f;
 		bool  wantLook    = false;
 
+		// Normalised rectangle to pin the cursor into the middle of. Defaults to
+		// the whole window, which is what it is whenever the game view is not
+		// being masked down.
+		ViewRect picture;
+
 		{
 			auto lock = Lock();
 			State& state = Get();
 			sensitivity = state.options.mouseSensitivity;
-			wantLook    = g_looking && state.mode == Mode::Editor;
+			wantLook    = state.lookActive && state.mode == Mode::Editor;
+
+			// Only when the matte is actually up. The same three conditions
+			// `DrawViewerMask` uses, and for the same reason: `gameView` holds the
+			// rectangle we *asked* for, which is not where the picture is until the
+			// engine-side write has been confirmed.
+			if (state.gameViewValid && state.gameViewApplied && !state.uiHidden &&
+			    state.gameView.w > 0.0f && state.gameView.h > 0.0f)
+			{
+				picture = state.gameView;
+			}
 		}
 
 		if (!wantLook)
@@ -615,14 +819,30 @@ namespace CameraControls::Input
 		if (!hwnd)
 			return;
 
-		// Pin the cursor to the centre of the client area and measure how far
-		// it moved away each tick. Without this the cursor walks off the window
+		// Pin the cursor to the centre of the picture and measure how far it
+		// moved away each tick. Without this the cursor walks off the window
 		// during a long pan and the drag stops dead.
+		//
+		// The centre of the *picture*, not the centre of the client area: with
+		// the game view masked down beside the panels, the window centre is over
+		// the timeline rather than over the shot, and the modloader draws its own
+		// cursor at whatever point we pin to.
 		RECT client{};
 		if (!GetClientRect(hwnd, &client))
 			return;
 
-		POINT centre{ (client.right - client.left) / 2, (client.bottom - client.top) / 2 };
+		const long clientW = client.right - client.left;
+		const long clientH = client.bottom - client.top;
+		if (clientW <= 0 || clientH <= 0)
+			return;
+
+		// Applied as fractions of the client rect rather than as the pixel
+		// numbers the render thread laid the panels out in, so a backbuffer that
+		// is not 1:1 with the client area cannot put the pin off-centre.
+		POINT centre{
+			static_cast<long>((picture.x + picture.w * 0.5f) * static_cast<float>(clientW)),
+			static_cast<long>((picture.y + picture.h * 0.5f) * static_cast<float>(clientH))
+		};
 		if (!ClientToScreen(hwnd, &centre))
 			return;
 
@@ -639,9 +859,15 @@ namespace CameraControls::Input
 			return;
 		}
 
-		const double dx = static_cast<double>(cursor.x - centre.x);
-		const double dy = static_cast<double>(cursor.y - centre.y);
+		// Measured against where the cursor was actually *put* last tick, not
+		// against where it is being put this one. The two are the same until the
+		// centre moves -- a window resize, or the mask being toggled mid-drag --
+		// and then the difference between them is a one-frame view snap of
+		// however far the centre jumped.
+		const double dx = static_cast<double>(cursor.x - g_lookAnchor.x);
+		const double dy = static_cast<double>(cursor.y - g_lookAnchor.y);
 
+		g_lookAnchor = centre;
 		SetCursorPos(centre.x, centre.y);
 
 		if (dx == 0.0 && dy == 0.0)

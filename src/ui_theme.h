@@ -131,6 +131,7 @@ namespace CameraControls::Theme
 	#define CC_ICON_EARLIER     "\xEE\x97\x84"   // U+E5C4 arrow_back
 	#define CC_ICON_LATER       "\xEE\x97\x88"   // U+E5C8 arrow_forward
 	#define CC_ICON_CANCEL      "\xEE\x97\x8D"   // U+E5CD close
+	#define CC_ICON_BOLT        "\xEE\x8F\xA7"   // U+E3E7 flash_on -- func frames
 
 	// --- Palette ----------------------------------------------------------
 	struct Rgba { float r, g, b, a; };
@@ -147,6 +148,12 @@ namespace CameraControls::Theme
 	constexpr Rgba kRuler         { 0.55f, 0.58f, 0.64f, 1.00f };
 	constexpr Rgba kDanger        { 0.90f, 0.30f, 0.28f, 1.00f };
 	constexpr Rgba kFadeMarker    { 0.75f, 0.45f, 1.00f, 1.00f };
+
+	// Func frames. Far enough from the amber keyframe diamond to be told apart
+	// at a glance without reading the row it is on -- the two live on the same
+	// track and mean entirely different things.
+	constexpr Rgba kFuncFrame     { 0.98f, 0.36f, 0.62f, 1.00f };
+	constexpr Rgba kFuncFrameHover{ 1.00f, 0.62f, 0.80f, 1.00f };
 
 	// The matte around the squeezed game view, and the hairline framing it.
 	// Opaque on purpose -- it is covering whatever the engine last left in

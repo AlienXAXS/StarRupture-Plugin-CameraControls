@@ -12,15 +12,24 @@ game's actual camera.
 ## What it does
 
 - **Free-fly camera.** Detaches the view from your character and gives you a proper fly cam: WASD + QE, mouse look,
-  boost and crawl modifiers, roll, and live FOV.
+  boost and crawl modifiers, roll, and live FOV. Scroll the wheel while holding right mouse to change how fast it flies,
+  without letting go of the camera.
 - **Keyframes at the press of a key.** Position, rotation and FOV are recorded from wherever the camera is standing.
 - **A real timeline.** Clips between keyframes, a draggable playhead, ripple and trim editing, zoom and pan.
-- **Per-keyframe control.** Speed, smoothness, ease in/out, FOV, fade in/out, and an optional look-at target.
+- **Per-keyframe control.** Speed, smoothness, ease in/out, FOV, focus, fade in/out, and an optional look-at target.
+- **Depth of field, animated.** Turn it on for a shot and every keyframe carries its own focus distance and aperture, so
+  a focus pull is just two keyframes with different distances. One click focuses a keyframe on whatever it is aiming at.
+  Off by default — the game keeps its own look until you ask for yours.
+- **Cues that change the world.** Alongside keyframes, the timeline carries *func frames* — markers that hang from the
+  top of the track and fire when the playhead reaches them during a take. Start a rupture on cue, set its phase, jump it
+  forward, pause it, cancel it. Right-click the track to place one.
 - **Scrubbing moves the camera.** Drag the playhead and the camera flies along the path with you.
 - **In-world gizmos.** The path is drawn as a spline in the 3D world, with a camera frustum at every keyframe. The
   selected keyframe pulses so you can pick it out of a dense path.
 - **Double-click to resume.** Double-clicking a keyframe flies the camera to that exact pose, so you can carry on
   composing from a shot you already set up.
+- **Ctrl+click to select several.** Keyframes and cues together, in any mix. Drag any one of them and the whole group
+  moves, keeping its spacing; `Delete` removes the lot.
 - **Playback mode.** A countdown, then the timeline runs start to finish with the game HUD and the editor out of the
   way, for a clean capture.
 - **Projects saved to disk.** Plain, hand-editable JSON under `Plugins\CameraControls\Projects\`.
@@ -47,7 +56,8 @@ game's actual camera.
 6. Press **F7** again to put everything back.
 
 The keybind cheat-sheet stays pinned to the top-left corner the whole time you are in the editor, showing your actual
-bindings rather than the defaults.
+bindings rather than the defaults. **Right-click the timeline track** for a menu that adds a keyframe or a world cue
+wherever you clicked.
 
 ---
 
@@ -65,11 +75,12 @@ All of these are rebindable from the ModLoader's plugin config UI (or `CameraCon
 | `E` / `Q` | Fly up / down |
 | `Left Shift` / `Left Ctrl` | Fly faster / slower (hold) |
 | Right mouse (hold) | Look around |
+| Mouse wheel (while looking) | Fly faster / slower — the same setting as the Fly speed slider |
 | `Z` / `C` | Roll left / right |
 | `X` | Level the camera — zero all rotation without moving it |
 | `R` / `F` | Zoom in / out (FOV) |
 | `K` | Add a keyframe at the camera |
-| `Shift+K` | Insert a keyframe after the selected one |
+| `I` | Insert a keyframe after the selected one |
 | `U` | Re-record the selected keyframe from the camera |
 | `G` | Fly the camera to the selected keyframe |
 | `Delete` | Delete the selected keyframe |
@@ -107,8 +118,60 @@ uses non-uniform tangents, so a long segment next to a short one does not oversh
 **Ease** shapes the velocity within a segment: the leaving keyframe's *ease out* governs the first half, the arriving
 keyframe's *ease in* the second.
 
+**Ctrl+click** adds a keyframe or a cue to the selection, and removes it again if it is already in. Dragging any member
+moves the whole group and keeps its spacing — a keyframe that runs into an unselected neighbour stops there and rejoins
+the group as soon as there is room, rather than falling behind for good. `Delete` removes everything selected. The
+inspector shows only a count and a delete button while several things are selected: editing "the keyframe's rotation"
+means nothing when there are five of them, so click one on its own to go back to editing it.
+
 **Fades** dip to (or out of) a colour around a keyframe's time. Fade in on the first keyframe and fade out on the last
 is the usual pairing.
+
+---
+
+## Func frames — cues that change the world
+
+A keyframe says where the camera is. A **func frame** says what the *world* does at one instant of the take. They live
+on the same timeline and are drawn from its **top** edge, in pink, where keyframes hang from the bottom in amber —
+different row, different colour, so the two never have to be told apart by reading a label.
+
+Right-click anywhere on the track for the menu: add a keyframe at the click, add a cue, move the playhead there, or
+delete whatever was under the cursor. Click a cue to select it and drag it to retime; double-click to put the playhead
+on it.
+
+The actions available today all drive the rupture (the game calls it an "enviro wave" internally):
+
+| Cue | What it does |
+|---|---|
+| Start rupture | Begins a Heat or Cold rupture, exactly as the world's own timer would |
+| Set rupture phase | Restarts the running rupture at a chosen stage — pre-wave, moving, fade-out or growback |
+| Set rupture progress | Jumps the running rupture to a point within its current stage — or **ramps** it smoothly between a start and end percentage over a duration you set |
+| Cancel rupture | Ends it immediately |
+| Pause / Resume rupture | Holds it where it is, and lets it go again |
+
+**Ramping the rupture across the shot.** Tick **Ramp over time** on a *Set rupture progress* cue and it stops being an
+instant: give it a start percentage, an end percentage and a duration, and the rupture is driven smoothly between them
+while the playhead is inside that span. The span is drawn as a bar running right from the cue's marker, so you can line
+it up against the camera move it happens under. Because it follows the playhead rather than firing as the playhead
+passes, scrubbing into the middle of a ramp puts the rupture exactly where that moment says it should be — which makes
+it the one cue you can compose against by dragging.
+
+Three things worth knowing:
+
+- **Cues fire whenever the playhead moves forward over them** — during a take, during preview play (`Space`), and while
+  you scrub the timeline live, so the world keeps up with wherever you have dragged to.
+- **Scrubbing backwards takes them back.** Dragging the playhead back past a *Start rupture* cue cancels it; back past a
+  *Pause* resumes it, and vice versa. Drag out over a cue and back again and the world is where it started. Three of the
+  six actions have an inverse like that; **Set phase**, **Set progress** and **Cancel** do not, and the inspector says so
+  under each one rather than leaving you to find out by dragging. Untick a cue's **Enabled** box to work on camera
+  timing without it, or use **Trigger now** in the inspector to fire one on its own.
+- **A cue changes the save you are playing.** There is no undo for a rupture. This is the one part of the plugin whose
+  effects outlive the session, which is why every cue writes what it did to both the status line and the log.
+- **You have to be the one running the world** — single player or hosting. As a connected client the server has the
+  final say, and a cue may report success while nothing happens.
+
+Unlike keyframes, a func frame stores an **absolute** time rather than deriving one from segment durations. Retiming
+the camera move leaves cues exactly where they were put: they belong to a moment in the recording, not to a camera move.
 
 ---
 
