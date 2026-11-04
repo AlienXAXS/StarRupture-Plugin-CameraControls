@@ -274,7 +274,7 @@ the two disagreeing is one of the specific things worth catching.
 
 ## Requirements
 
-- StarRupture with [ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) **interface v52 or newer**.
+- StarRupture with [ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) **v1.23.0 or later** (interface v74).
   Three loader-side changes were made for this plugin: `hooks->HUD->DebugDraw` (v50) draws the in-world path,
   `AcquireInputPassthrough` (v51) is the cooperative input mode, and `GetMouseWheel` (v52) is what the timeline zooms
   with. v52 also fixed a keybind bug where binding a bare `LeftShift`/`LeftControl` never fired, because Windows
