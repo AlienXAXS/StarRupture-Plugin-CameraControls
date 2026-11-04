@@ -312,6 +312,10 @@ This is a client-only plugin — there is no camera to drive on a dedicated serv
 | [`src/project_io.{h,cpp}`](src/project_io.h) | JSON project save / load |
 | [`src/ui_*.{h,cpp}`](src/ui_editor.h) | Timeline widget, property inspector, viewport picking, overlays, theme |
 
+## Reporting Bugs
+
+Found a bug? [Report it on GitHub](https://github.com/AlienXAXS/StarRupture-Plugin-CameraControls/issues) and attach your `ModLoader.log` (in `<game>\StarRupture\Binaries\Win64\ModLoader\Logs\`).
+
 ## Credits
 
 Original mod by [@AlienXAXS](https://github.com/AlienXAXS).
