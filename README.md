@@ -283,6 +283,8 @@ the two disagreeing is one of the specific things worth catching.
 - [StarRupture-Game-SDK](https://github.com/AlienXAXS/StarRupture-Game-SDK) and
   [StarRupture-Plugin-SDK](https://github.com/AlienXAXS/StarRupture-Plugin-SDK) as sibling checkouts.
 
+After a game update that moves something the plugin reads, only the camera tool that depends on it switches off; the rest keeps working.
+
 ## Building
 
 ```bat

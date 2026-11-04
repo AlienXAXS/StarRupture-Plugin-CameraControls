@@ -1,0 +1,3 @@
+- After a game update, a camera tool whose game data moved turns itself off instead of the whole plugin
+- Bug reports now go to GitHub issues, linked from the README
+- Needs ModLoader v1.23.0 or later
