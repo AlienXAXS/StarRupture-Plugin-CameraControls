@@ -1,0 +1,312 @@
+[size=6][b]Camera Controls — Cinematic Camera Timeline for StarRupture[/b][/size]
+
+[b]Found a bug? Report it on GitHub: [url=https://github.com/AlienXAXS/StarRupture-Plugin-CameraControls/issues]https://github.com/AlienXAXS/StarRupture-Plugin-CameraControls/issues[/url][/b] and attach your [b]ModLoader.log[/b] (in [b]Binaries\Win64\ModLoader\Logs\[/b]).
+
+[quote][b][color=#ea9999]Warning: This plugin is not your normal plugin, it changes StarRupture into a timeline based video editor, its rather advanced.  Please ensure you have a save backed up before using it on one.  If you want to see a demo of what this plugin can do, check the Videos section.[/color][/b][/quote]
+A keyframe-based camera timeline that lets you create cinematic camera shots in StarRupture.
+
+Fly a free camera around your base, drop keyframes wherever you want the shot to pass through, then scrub, edit and play the entire camera move back — like a video editing timeline, except the timeline drives the game's actual camera.
+
+[b]Client-side only[/b]
+
+[line]
+
+[size=5][b]What It Does[/b][/size]
+
+Camera Controls gives you a complete in-game camera editor for creating smooth, controlled camera movements and cinematic shots.
+
+[list]
+[*][b]Free-fly camera[/b] — detach the camera from your character and freely fly around using WASD + QE, mouse look, boost, crawl, roll and live FOV controls.
+[/*]
+[*][b]Keyframes[/b] — record the camera's position, rotation and FOV at the press of a key.
+[/*]
+[*][b]Timeline editor[/b] — edit camera moves using a draggable playhead, trimming, ripple editing, zoom and pan.
+[/*]
+[*][b]Per-keyframe controls[/b] — adjust speed, smoothness, ease in/out, FOV, focus, fades and optional look-at targets.
+[/*]
+[*][b]Animated depth of field[/b] — give every keyframe its own focus distance and aperture to create focus pulls between shots.
+[/*]
+[*][b]Rupture cues[/b] — place timeline markers that can start, pause, resume, cancel and manipulate Rupture events during playback.
+[/*]
+[*][b]Live scrubbing[/b] — drag the playhead and the camera follows the path immediately.
+[/*]
+[*][b]3D camera path[/b] — keyframes are displayed in the world as a spline with camera frustums and selectable handles.
+[/*]
+[*][b]Quick shot selection[/b] — double-click a keyframe to fly the camera directly to that exact pose.
+[/*]
+[*][b]Multi-selection[/b] — Ctrl+click multiple keyframes and cues, then move or delete them as a group.
+[/*]
+[*][b]Playback mode[/b] — run a clean take with a countdown while the editor and game HUD are out of the way.
+[/*]
+[*][b]Projects saved to disk[/b] — projects use editable JSON files stored under [i]Plugins\CameraControls\Projects[/i].
+[/*]
+[*][b]Viewport integration[/b] — the game view is fitted into the available space around the editor panels rather than simply covering the shot.
+[/*]
+[/list]
+[line]
+
+[size=5][b]Getting Started[/b][/size]
+
+[list=1]
+[*]Load a save.
+[/*]
+[*]Press [b]F7[/b] to open the editor.
+[/*]
+[*]Fly the camera to where your shot should begin.
+[/*]
+[*]Press [b]K[/b] to create the first keyframe.
+[/*]
+[*]Fly to the next position and press [b]K[/b] again.
+[/*]
+[*]Continue adding keyframes until your camera move is complete.
+[/*]
+[*]Press [b]Space[/b] to preview the timeline.
+[/*]
+[*]Press [b]F8[/b] to run the shot in playback mode.
+[/*]
+[*]Press [b]F7[/b] again to leave the editor and restore your character.
+[/*]
+[/list]
+The first time the editor is opened, it displays a short warning explaining that your character is temporarily removed from the active world while editing and that timeline cues can affect the save you are currently playing.
+
+The keybind cheat-sheet remains visible in the editor and shows your actual configured bindings.
+
+[b]Tip:[/b] Right-click the timeline track to quickly add a keyframe or world cue at the position you clicked.
+
+[line]
+
+[size=5][b]Default Keybinds[/b][/size]
+
+All keybinds can be changed through the ModLoader plugin configuration or [i]CameraControls.ini[/i].
+
+[list]
+[*][b]F7[/b] — Enter / leave the editor
+[/*]
+[*][b]F8[/b] — Start / stop playback mode
+[/*]
+[*][b]F9[/b] — Hide / show editor windows
+[/*]
+[*][b]Esc[/b] — Stop a take and return to the editor
+[/*]
+[*][b]W A S D[/b] — Fly forward / left / back / right
+[/*]
+[*][b]E / Q[/b] — Fly up / down
+[/*]
+[*][b]Left Shift / Left Ctrl[/b] — Fly faster / slower
+[/*]
+[*][b]Right Mouse[/b] — Look around
+[/*]
+[*][b]Mouse Wheel[/b] — Adjust fly speed while looking
+[/*]
+[*][b]Z / C[/b] — Roll left / right
+[/*]
+[*][b]X[/b] — Level the camera
+[/*]
+[*][b]R / F[/b] — Zoom in / out
+[/*]
+[*][b]K[/b] — Add a keyframe
+[/*]
+[*][b]I[/b] — Insert a keyframe after the selected keyframe
+[/*]
+[*][b]U[/b] — Re-record the selected keyframe
+[/*]
+[*][b]G[/b] — Fly to the selected keyframe
+[/*]
+[*][b]Delete[/b] — Delete the selected keyframe
+[/*]
+[*][b], / .[/b] — Select previous / next keyframe
+[/*]
+[*][b]Space[/b] — Preview play / pause
+[/*]
+[/list]
+[line]
+
+[size=5][b]Timeline Editing[/b][/size]
+
+Each camera segment has its own duration and speed. Changing the speed of a segment automatically changes its effective duration and shifts everything after it accordingly.
+
+[b]Smoothness[/b] controls how the camera transitions between straight-line movement and curved spline movement.
+
+[b]Ease[/b] controls the camera's velocity through each segment, with the outgoing keyframe controlling the beginning of the segment and the incoming keyframe controlling the end.
+
+[b]Fades[/b] can be applied around keyframes to fade the shot into or out of a chosen colour.
+
+[list]
+[*]Click a keyframe to select it.
+[/*]
+[*]Drag a keyframe to retime it.
+[/*]
+[*]Double-click a keyframe to fly the camera to it.
+[/*]
+[*]Click a clip to select the segment.
+[/*]
+[*]Use the mouse wheel to zoom the timeline.
+[/*]
+[*]Middle-drag to pan the timeline.
+[/*]
+[*]Use Ctrl+click to select multiple keyframes and cues.
+[/*]
+[/list]
+When multiple items are selected, dragging one moves the entire selection while preserving the spacing between them.
+
+[line]
+
+[size=5][b]Rupture Cues [Experimental][/b][/size]
+
+Alongside camera keyframes, the timeline supports [b]func frames[/b] — cues that control the world's Rupture events during a take.
+
+Right-click the timeline to add a cue.
+
+[list]
+[*][b]Start rupture[/b] — starts a Heat or Cold Rupture.
+[/*]
+[*][b]Set rupture phase[/b] — restarts the active Rupture at a chosen phase.
+[/*]
+[*][b]Set rupture progress[/b] — jumps to a specific point within the current phase.
+[/*]
+[*][b]Ramp rupture progress[/b] — smoothly moves Rupture progress between two percentages over a chosen duration.
+[/*]
+[*][b]Cancel rupture[/b] — immediately ends the active Rupture.
+[/*]
+[*][b]Pause / Resume rupture[/b] — pauses or resumes the active Rupture.
+[/*]
+[/list]
+[b]Rupture progress can be animated.[/b]
+
+Enable [i]Ramp over time[/i] on a Set rupture progress cue, choose a starting percentage, ending percentage and duration, and the Rupture will smoothly progress between those values while the playhead moves through the ramp.
+
+This makes it possible to synchronise a changing Rupture state with a camera move.
+
+[b]Important:[/b] Rupture cues affect the save you are currently playing. They do not have an undo function.
+
+Cues can be enabled or disabled individually, and [i]Trigger now[/i] can be used to activate a cue directly from its inspector.
+
+Rupture cues require you to be running the world yourself — either in single-player or as the host. Connected clients do not have authority over the server's Rupture state.
+
+[line]
+
+[size=5][b]Depth of Field[/b][/size]
+
+Depth of field can be enabled for individual shots.
+
+Each keyframe can store its own:
+
+[list]
+[*]Focus distance
+[/*]
+[*]Aperture
+[/*]
+[*]Focus target
+[/*]
+[/list]
+This allows you to create cinematic focus pulls simply by setting different focus distances on different keyframes.
+
+Depth of field is [b]off by default[/b], so the game keeps its normal camera behaviour until you enable it.
+
+[line]
+
+[size=5][b]Camera & Player Safety[/b][/size]
+
+When the camera is detached, Camera Controls temporarily moves your character out of harm's way while you film.
+
+Your character's position, movement mode and gravity settings are saved before entering the editor.
+
+The character is frozen and moved far below the terrain into a protected habitat shelter while the camera is being controlled.
+
+When you leave the editor, your character is returned to their original position and their previous movement state is restored.
+
+The camera itself does not follow the character. The game's world streaming follows the active camera view, allowing you to film distant areas without dragging your character through the shot.
+
+The plugin also protects the player from several causes of instant death while filming, including world bounds, damage and certain hazard/kill triggers.
+
+These protections are restored when you leave the editor.
+
+[line]
+
+[size=5][b]Input & Controls[/b][/size]
+
+By default, the editor uses exclusive input capture while composing.
+
+This prevents normal game input from interfering with camera editing — for example, accidentally firing a weapon or opening the pause menu while working on a shot.
+
+If you want the game to continue receiving input while editing, enable:
+
+[i][Editor] PassthroughInput = true[/i]
+
+This allows the game and editor to share input where appropriate.
+
+[b]Playback mode always uses exclusive input capture.[/b]
+
+The plugin also restores the character's normal input mappings when leaving the editor.
+
+[line]
+
+[size=5][b]Layout[/b][/size]
+
+The editor automatically fits the game's 3D view into the space left between the timeline and inspector panels.
+
+This allows you to keep the camera view visible while working with the editor.
+
+[b]Note:[/b] The preview is cropped rather than scaled, so playback can show more of the game view than the editor preview.
+
+If exact framing is important, disable the viewport fitting behaviour.
+
+[line]
+
+[size=5][b]Requirements[/b][/size]
+
+[list]
+[*]StarRupture
+[/*]
+[*]StarRupture ModLoader with [b]interface v52 or newer[/b]
+[/*]
+[/list]
+The plugin requires ModLoader interface v52 or newer for its camera path rendering, cooperative input handling and timeline mouse-wheel controls.
+
+[b]This is a client-only plugin.[/b] There is no dedicated-server component.
+
+[line]
+
+[size=5][b]Installation[/b][/size]
+
+[list=1]
+[*]Download the latest release from the [b]Files[/b] tab.
+[/*]
+[*]Open the downloaded ZIP.
+[/*]
+[*]Copy the included [i]CameraControls.dll[/i] into the game's [i]Modloader\[/i][i]Plugins[/i] directory next to [i]dwmapi.dll[/i].
+[/*]
+[*]Launch StarRupture.
+[/*]
+[*]Press [b]F7[/b] to open the Camera Controls editor.
+[/*]
+[/list]
+On first run, [i]CameraControls.ini[/i] is generated in:
+
+[i]<game_dir>\Plugins\config[/i]
+
+[line]
+
+[size=5][b]Troubleshooting[/b][/size]
+
+[list]
+[*][b]The editor does not open[/b] — make sure the plugin is installed correctly and that your ModLoader version supports interface v52 or newer.
+[/*]
+[*][b]The camera controls do not work[/b] — check your configured keybinds and make sure the plugin is receiving input.
+[/*]
+[*][b]The character does not respond after leaving the editor[/b] — close and reopen the editor to retry the input restoration.
+[/*]
+[*][b]Rupture cue does nothing[/b] — you must be playing single-player or hosting the world. Connected clients cannot control the server's Rupture state.
+[/*]
+[*][b]The preview framing looks different from playback[/b] — the editor viewport is cropped rather than scaled. Disable viewport fitting if exact framing is required.
+[/*]
+[*][b]Need to diagnose input issues[/b] — press [b]Home[/b] to write a control-state snapshot to the log.
+[/*]
+[/list]
+[line]
+
+[size=5][b]Disclaimer[/b][/size]
+
+Use at your own risk. Rupture cues can modify the world state of the save you are currently playing, and there is no undo for their effects.
+
+The authors are not responsible for any damage, data loss, crashes or other issues caused by using this software.
