@@ -1,24 +1,18 @@
 #include "viewport_fit.h"
 #include "plugin_helpers.h"
+#include "cameracontrols_fields.h"
 
 #include "Engine_classes.hpp"
 
 #include <cmath>
 #include <cstdint>
 
+namespace Fields = CameraControlsFields;
+
 namespace CameraControls::ViewportFit
 {
 	namespace
 	{
-		// ULocalPlayer::Origin and ::Size -- two FVector2Ds, which are pairs of
-		// doubles in UE5. Neither is a UPROPERTY, so they land inside the
-		// generated class's padding: the dump has ViewportClient at 0x78,
-		// Pad_80[0x38], then AspectRatioAxisConstraint at 0xB8. The engine's
-		// member order across that gap is Origin, Size, LastViewLocation, and
-		// 0x10 + 0x10 + 0x18 is exactly 0x38 -- the arithmetic only closes here.
-		constexpr int kOriginOffset = 0x80;
-		constexpr int kSizeOffset   = 0x90;
-
 		struct Rect
 		{
 			double x = 0.0, y = 0.0, w = 1.0, h = 1.0;
@@ -34,7 +28,7 @@ namespace CameraControls::ViewportFit
 		{
 			try
 			{
-				SDK::UWorld* world = SDK::UWorld::GetWorld();
+				SDK::UWorld* world = PluginSdkRuntime::GetWorld();
 				if (!world)
 					return nullptr;
 
@@ -57,33 +51,39 @@ namespace CameraControls::ViewportFit
 			return nullptr;
 		}
 
-		double* Field(SDK::ULocalPlayer* player, int offset)
+		// The rect members, or null when the loader's map did not resolve them.
+		bool Resolved(SDK::ULocalPlayer* player)
 		{
-			return reinterpret_cast<double*>(reinterpret_cast<uint8_t*>(player) + offset);
+			return Fields::LocalPlayerOrigin.In(player) && Fields::LocalPlayerSize.In(player);
 		}
 
 		Rect Read(SDK::ULocalPlayer* player)
 		{
-			const double* origin = Field(player, kOriginOffset);
-			const double* size   = Field(player, kSizeOffset);
+			const SDK::FVector2D* origin = Fields::LocalPlayerOrigin.In(player);
+			const SDK::FVector2D* size   = Fields::LocalPlayerSize.In(player);
 
 			Rect rect;
-			rect.x = origin[0];
-			rect.y = origin[1];
-			rect.w = size[0];
-			rect.h = size[1];
+			if (origin && size)
+			{
+				rect.x = origin->X;
+				rect.y = origin->Y;
+				rect.w = size->X;
+				rect.h = size->Y;
+			}
 			return rect;
 		}
 
 		void Write(SDK::ULocalPlayer* player, const Rect& rect)
 		{
-			double* origin = Field(player, kOriginOffset);
-			double* size   = Field(player, kSizeOffset);
+			SDK::FVector2D* origin = Fields::LocalPlayerOrigin.In(player);
+			SDK::FVector2D* size   = Fields::LocalPlayerSize.In(player);
+			if (!origin || !size)
+				return;
 
-			origin[0] = rect.x;
-			origin[1] = rect.y;
-			size[0]   = rect.w;
-			size[1]   = rect.h;
+			origin->X = rect.x;
+			origin->Y = rect.y;
+			size->X   = rect.w;
+			size->Y   = rect.h;
 		}
 
 		// The one guard against the offsets being wrong on some future build.
@@ -116,13 +116,21 @@ namespace CameraControls::ViewportFit
 			if (g_haveSaved)
 				return true;
 
+			if (!Resolved(player))
+			{
+				g_supported = false;
+				LOG_ERROR("ViewportFit: the loader has no ULocalPlayer rect members for this game "
+				          "build -- viewport fitting disabled for this session");
+				return false;
+			}
+
 			const Rect current = Read(player);
 			if (!Plausible(current))
 			{
 				g_supported = false;
 				LOG_ERROR("ViewportFit: ULocalPlayer+0x%X does not look like a viewport rect "
 				          "(%.3f,%.3f %.3fx%.3f) -- viewport fitting disabled for this session",
-				          kOriginOffset, current.x, current.y, current.w, current.h);
+				          Fields::LocalPlayerOrigin.offset, current.x, current.y, current.w, current.h);
 				return false;
 			}
 
@@ -135,7 +143,7 @@ namespace CameraControls::ViewportFit
 	}
 
 	bool IsActive()    { return g_active; }
-	bool IsSupported() { return g_supported; }
+	bool IsSupported() { return g_supported && Fields::ViewportMask.On(); }
 
 	void ForgetWorldState()
 	{
@@ -148,7 +156,7 @@ namespace CameraControls::ViewportFit
 
 	bool Apply(float x, float y, float width, float height)
 	{
-		if (!g_supported)
+		if (!IsSupported())
 			return false;
 
 		SDK::ULocalPlayer* player = GetLocalPlayer();

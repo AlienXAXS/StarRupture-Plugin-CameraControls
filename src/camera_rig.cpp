@@ -3,6 +3,7 @@
 #include "fov_override.h"
 #include "plugin_config.h"
 #include "plugin_helpers.h"
+#include "cameracontrols_fields.h"
 
 #include "Chimera_classes.hpp"   // UCrHeroComponent input-config binding
 #include "Engine_classes.hpp"
@@ -108,12 +109,20 @@ namespace CameraControls::Rig
 		// contextual config with that tag.
 		bool BindOneInputConfig(SDK::UCrHeroComponent* hero, const char* wanted, bool logIt)
 		{
-			for (int i = 0; i < hero->ContextualInputBindings.Num(); ++i)
+			auto* bindings = CameraControlsFields::ContextualInputBindings.In(hero);
+			if (!bindings)
 			{
-				if (!hero->ContextualInputBindings.IsValidIndex(i))
+				if (logIt)
+					LOG_WARN("Rig: the pawn's contextual input bindings are not available on this build");
+				return false;
+			}
+
+			for (int i = 0; i < bindings->Num(); ++i)
+			{
+				if (!bindings->IsValidIndex(i))
 					continue;
 
-				const SDK::FGameplayTag tag = hero->ContextualInputBindings[i].Key();
+				const SDK::FGameplayTag tag = (*bindings)[i].Key();
 				if (tag.TagName.ToString() != wanted)
 					continue;
 
@@ -151,7 +160,7 @@ namespace CameraControls::Rig
 			if (logIt)
 			{
 				LOG_WARN("Rig: input config tag '%s' is not one of this pawn's %d contextual "
-				         "configs", wanted, hero->ContextualInputBindings.Num());
+				         "configs", wanted, bindings->Num());
 			}
 
 			return false;
@@ -173,7 +182,7 @@ namespace CameraControls::Rig
 
 		SDK::UWorld* GetWorld()
 		{
-			try { return SDK::UWorld::GetWorld(); }
+			try { return PluginSdkRuntime::GetWorld(); }
 			catch (...) { return nullptr; }
 		}
 
@@ -639,6 +648,65 @@ namespace CameraControls::Rig
 		}
 	}
 
+	// Logs the hero component's exclusive and contextual config tags and its
+	// default input mappings.
+	static void LogHeroInputConfigs(SDK::UCrHeroComponent* hero)
+	{
+		using namespace CameraControlsFields;
+
+		auto* contextual = ContextualInputBindings.In(hero);
+		auto* exclusive  = ExclusiveInputBindings.In(hero);
+		auto* defaults   = DefaultInputMappings.In(hero);
+		if (!contextual || !exclusive || !defaults)
+			return;
+
+		const int contextualCount = contextual->Num();
+		const int exclusiveCount  = exclusive->Num();
+
+		LOG_TRACE("Rig: hero component %p -- %d exclusive, %d contextual input configs",
+		          static_cast<void*>(hero), exclusiveCount, contextualCount);
+
+		for (int i = 0; i < contextualCount; ++i)
+		{
+			if (!contextual->IsValidIndex(i))
+				continue;
+
+			LOG_TRACE("Rig:   contextual config tag '%s'", (*contextual)[i].Key().TagName.ToString().c_str());
+		}
+
+		for (int i = 0; i < exclusiveCount; ++i)
+		{
+			if (!exclusive->IsValidIndex(i))
+				continue;
+
+			LOG_TRACE("Rig:   exclusive config tag '%s'", (*exclusive)[i].Key().TagName.ToString().c_str());
+		}
+
+		// The list `InitializePlayerInput` adds, straight from the component.
+		//
+		// Reported by its stored asset *path*, never by resolving the soft
+		// pointer. `TSoftObjectPtr::Get()` in this SDK bottoms out in
+		// `GObjects->GetByIndex(ObjectIndex)` with no bounds check and no
+		// serial-number validation, so calling it on an entry that was never
+		// resolved indexes off the end of the object array and takes the game
+		// down. It did exactly that. The asset path is plain FName data sitting
+		// next to the weak pointer and is safe to read either way.
+		const int defaultCount = defaults->Num();
+		LOG_TRACE("Rig: hero component has %d default input mapping(s)", defaultCount);
+
+		for (int i = 0; i < defaultCount; ++i)
+		{
+			const auto& entry = (*defaults)[i];
+			const auto* mapping  = DefaultMappingContext.In(static_cast<const void*>(&entry));
+			const auto* priority = DefaultMappingPriority.In(static_cast<const void*>(&entry));
+			if (!mapping || !priority)
+				continue;
+
+			LOG_TRACE("Rig:   default mapping '%s' priority %d",
+			          mapping->ObjectID.AssetPath.AssetName.ToString().c_str(), *priority);
+		}
+	}
+
 	void RestorePlayerInputConfigs(bool repair)
 	{
 		try
@@ -660,49 +728,10 @@ namespace CameraControls::Rig
 
 			// Log the vocabulary first. Which tags this build even has is half the
 			// diagnosis, and it is the only way to know what an unbind is unbinding.
-			const int exclusiveCount  = hero->ExclusiveInputBindings.Num();
-			const int contextualCount = hero->ContextualInputBindings.Num();
-
-			LOG_TRACE("Rig: hero component %p -- %d exclusive, %d contextual input configs",
-			          static_cast<void*>(hero), exclusiveCount, contextualCount);
-
-			for (int i = 0; i < contextualCount; ++i)
-			{
-				if (!hero->ContextualInputBindings.IsValidIndex(i))
-					continue;
-
-				LOG_TRACE("Rig:   contextual config tag '%s'",
-				          hero->ContextualInputBindings[i].Key().TagName.ToString().c_str());
-			}
-
-			for (int i = 0; i < exclusiveCount; ++i)
-			{
-				if (!hero->ExclusiveInputBindings.IsValidIndex(i))
-					continue;
-
-				LOG_TRACE("Rig:   exclusive config tag '%s'",
-				          hero->ExclusiveInputBindings[i].Key().TagName.ToString().c_str());
-			}
-
-			// The list `InitializePlayerInput` adds, straight from the component.
-			//
-			// Reported by its stored asset *path*, never by resolving the soft
-			// pointer. `TSoftObjectPtr::Get()` in this SDK bottoms out in
-			// `GObjects->GetByIndex(ObjectIndex)` with no bounds check and no
-			// serial-number validation, so calling it on an entry that was never
-			// resolved indexes off the end of the object array and takes the game
-			// down. It did exactly that. The asset path is plain FName data sitting
-			// next to the weak pointer and is safe to read either way.
-			const int defaults = hero->DefaultInputMappings.Num();
-			LOG_TRACE("Rig: hero component has %d default input mapping(s)", defaults);
-
-			for (int i = 0; i < defaults; ++i)
-			{
-				const auto& entry = hero->DefaultInputMappings[i];
-				LOG_TRACE("Rig:   default mapping '%s' priority %d",
-				          entry.InputMapping.ObjectID.AssetPath.AssetName.ToString().c_str(),
-				          entry.Priority);
-			}
+			// Input diagnostics: off with the rest of them when the game moves one
+			// of these members.
+			if (CameraControlsFields::ControlProbe.On())
+				LogHeroInputConfigs(hero);
 
 			if (!repair)
 			{

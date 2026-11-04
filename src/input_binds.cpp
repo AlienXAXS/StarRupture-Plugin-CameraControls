@@ -2,6 +2,7 @@
 #include "editor_state.h"
 #include "plugin_config.h"
 #include "plugin_helpers.h"
+#include "cameracontrols_fields.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -296,7 +297,8 @@ namespace CameraControls::Input
 			state.flyInput.right    = (down(Action::FlyRight)   ? 1 : 0) - (down(Action::FlyLeft)  ? 1 : 0);
 			state.flyInput.up       = (down(Action::FlyUp)      ? 1 : 0) - (down(Action::FlyDown)  ? 1 : 0);
 			state.flyInput.rollAxis = (down(Action::RollRight)  ? 1 : 0) - (down(Action::RollLeft) ? 1 : 0);
-			state.flyInput.fovAxis  = (down(Action::FovOut)     ? 1 : 0) - (down(Action::FovIn)    ? 1 : 0);
+			state.flyInput.fovAxis  = CameraControlsFields::FovControl.On()
+				? (down(Action::FovOut) ? 1 : 0) - (down(Action::FovIn) ? 1 : 0) : 0;
 			state.flyInput.boost    = down(Action::FlyBoost);
 			state.flyInput.crawl    = down(Action::FlyCrawl);
 		}

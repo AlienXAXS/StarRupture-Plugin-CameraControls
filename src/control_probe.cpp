@@ -6,6 +6,7 @@
 #include "player_safeguard.h"
 #include "player_vitals.h"
 #include "plugin_helpers.h"
+#include "cameracontrols_fields.h"
 #include "viewport_fit.h"
 
 #include "Chimera_classes.hpp"
@@ -157,7 +158,7 @@ namespace CameraControls::Probe
 
 		SDK::UWorld* GetWorld()
 		{
-			try { return SDK::UWorld::GetWorld(); }
+			try { return PluginSdkRuntime::GetWorld(); }
 			catch (...) { return nullptr; }
 		}
 
@@ -364,7 +365,7 @@ namespace CameraControls::Probe
 		// from our own bug right up until you can see the count.
 		void CaptureGameController(SDK::APlayerController* pc, Snapshot& snapshot)
 		{
-			if (!pc)
+			if (!pc || !CameraControlsFields::ControlProbe.On())
 				return;
 
 			try
@@ -377,14 +378,15 @@ namespace CameraControls::Probe
 
 				auto* crpc = static_cast<SDK::ACrPlayerControllerBase*>(pc);
 
-				Add(snapshot, "crpc", "menuBlockers",  Str("%d", crpc->GameMenuBlockers.Num()));
-				Add(snapshot, "crpc", "inPauseMenu",   Bl(crpc->bReplInPauseMenu));
-				Add(snapshot, "crpc", "previousPawn",  Ptr(crpc->PreviousPawn));
-				Add(snapshot, "crpc", "mainCharacter", Ptr(crpc->PlayerMainCharacter));
-				Add(snapshot, "crpc", "interactable",  Obj(crpc->CurrentInteractableActor));
-				Add(snapshot, "crpc", "activeInteract",Ptr(crpc->CurrentInteractableActorWithActiveInteraction));
-				Add(snapshot, "crpc", "zipline",       Ptr(crpc->CurrentZipline));
-				Add(snapshot, "crpc", "buildTarget",   Ptr(crpc->CurrentBuildingTarget));
+				const auto* blockers = CameraControlsFields::PcMenuBlockers.In(crpc);
+				Add(snapshot, "crpc", "menuBlockers",  blockers ? Str("%d", blockers->Num()) : std::string("unavailable"));
+				Add(snapshot, "crpc", "inPauseMenu",   Bl(CameraControlsFields::ValueOr(CameraControlsFields::PcInPauseMenu, crpc, false)));
+				Add(snapshot, "crpc", "previousPawn",  Ptr(CameraControlsFields::ValueOr(CameraControlsFields::PcPreviousPawn, crpc)));
+				Add(snapshot, "crpc", "mainCharacter", Ptr(CameraControlsFields::ValueOr(CameraControlsFields::PcMainCharacter, crpc)));
+				Add(snapshot, "crpc", "interactable",  Obj(CameraControlsFields::ValueOr(CameraControlsFields::PcInteractable, crpc)));
+				Add(snapshot, "crpc", "activeInteract",Ptr(CameraControlsFields::ValueOr(CameraControlsFields::PcActiveInteract, crpc)));
+				Add(snapshot, "crpc", "zipline",       Ptr(CameraControlsFields::ValueOr(CameraControlsFields::PcZipline, crpc)));
+				Add(snapshot, "crpc", "buildTarget",   Ptr(CameraControlsFields::ValueOr(CameraControlsFields::PcBuildTarget, crpc)));
 			}
 			catch (...)
 			{
@@ -756,7 +758,7 @@ namespace CameraControls::Probe
 		// is exactly why they are worth watching.
 		void CaptureGameCharacter(SDK::APawn* pawn, Snapshot& snapshot)
 		{
-			if (!pawn)
+			if (!pawn || !CameraControlsFields::ControlProbe.On())
 				return;
 
 			try
@@ -769,14 +771,14 @@ namespace CameraControls::Probe
 
 				auto* character = static_cast<SDK::ACrCharacterPlayerBase*>(pawn);
 
-				Add(snapshot, "crchar", "disabledPawn", Bl(character->bIsDisabledPawn));
+				Add(snapshot, "crchar", "disabledPawn", Bl(CameraControlsFields::ValueOr(CameraControlsFields::CharDisabledPawn, character, false)));
 				Add(snapshot, "crchar", "interactState",
-				    Str("%d", static_cast<int>(character->InteractionState)));
-				Add(snapshot, "crchar", "dead",         Bl(character->bDead));
-				Add(snapshot, "crchar", "onLadder",     Bl(character->bOnLadder));
-				Add(snapshot, "crchar", "initialised",  Bl(character->bCharacterSelectedAndInitialized));
-				Add(snapshot, "crchar", "buildingDrone",Ptr(character->BuildingDrone));
-				Add(snapshot, "crchar", "crpc",         Ptr(character->CrPC));
+				    Str("%d", static_cast<int>(CameraControlsFields::ValueOr(CameraControlsFields::CharInteractState, character))));
+				Add(snapshot, "crchar", "dead",         Bl(CameraControlsFields::ValueOr(CameraControlsFields::CharDead, character, false)));
+				Add(snapshot, "crchar", "onLadder",     Bl(CameraControlsFields::ValueOr(CameraControlsFields::CharOnLadder, character, false)));
+				Add(snapshot, "crchar", "initialised",  Bl(CameraControlsFields::ValueOr(CameraControlsFields::CharInitialised, character, false)));
+				Add(snapshot, "crchar", "buildingDrone",Ptr(CameraControlsFields::ValueOr(CameraControlsFields::CharBuildingDrone, character)));
+				Add(snapshot, "crchar", "crpc",         Ptr(CameraControlsFields::ValueOr(CameraControlsFields::CharController, character)));
 			}
 			catch (...)
 			{

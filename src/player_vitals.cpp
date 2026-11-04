@@ -1,8 +1,11 @@
 #include "player_vitals.h"
 #include "plugin_helpers.h"
+#include "cameracontrols_fields.h"
 
 #include "Engine_classes.hpp"
 #include "Chimera_classes.hpp"
+
+namespace Fields = CameraControlsFields;
 
 namespace CameraControls::Vitals
 {
@@ -15,7 +18,7 @@ namespace CameraControls::Vitals
 		{
 			try
 			{
-				SDK::UWorld* world = SDK::UWorld::GetWorld();
+				SDK::UWorld* world = PluginSdkRuntime::GetWorld();
 				if (!world) return nullptr;
 
 				SDK::APlayerController* pc = SDK::UGameplayStatics::GetPlayerController(world, 0);
@@ -83,35 +86,41 @@ namespace CameraControls::Vitals
 			// Health, and the three the player actually watches -- food, water,
 			// air -- plus shield and suit energy, which are just as capable of
 			// ending a long take.
-			auto pinToMax = [&](auto* set, auto memberCurrent, auto memberMax)
+			auto pinToMax = [&](const auto& setField, const auto& currentField, const auto& boundField)
 			{
-				if (!set) return;
-				PinTo(set->*memberCurrent, set->*memberMax);
+				auto* set     = Fields::ValueOr(setField, character);
+				auto* current = currentField.In(set);
+				auto* bound   = boundField.In(set);
+				if (!current || !bound) return;
+				PinTo(*current, *bound);
 				touchedAnything = true;
 			};
 
-			pinToMax(character->HealthAttributes,    &SDK::UCrHealthAttributeSet::CurrentHealth,       &SDK::UCrHealthAttributeSet::MaxHealth);
-			pinToMax(character->CaloriesAttributes,  &SDK::UCrCaloriesAttributeSet::CurrentCalories,   &SDK::UCrCaloriesAttributeSet::MaxCalories);
-			pinToMax(character->HydrationAttributes, &SDK::UCrHydrationAttributeSet::CurrentHydration, &SDK::UCrHydrationAttributeSet::MaxHydration);
-			pinToMax(character->OxygenAttributes,    &SDK::UCrOxygenAttributeSet::CurrentOxygen,       &SDK::UCrOxygenAttributeSet::MaxOxygen);
-			pinToMax(character->EnergyAttributes,    &SDK::UCrEnergyAttributeSet::CurrentEnergy,       &SDK::UCrEnergyAttributeSet::MaxEnergy);
-			pinToMax(character->ShieldAttributes,    &SDK::UCrShieldAttributeSet::CurrentShield,       &SDK::UCrShieldAttributeSet::MaxShield);
+			pinToMax(Fields::HealthSet, Fields::HealthCurrent, Fields::HealthMax);
+			pinToMax(Fields::CaloriesSet, Fields::CaloriesCurrent, Fields::CaloriesMax);
+			pinToMax(Fields::HydrationSet, Fields::HydrationCurrent, Fields::HydrationMax);
+			pinToMax(Fields::OxygenSet, Fields::OxygenCurrent, Fields::OxygenMax);
+			pinToMax(Fields::EnergySet, Fields::EnergyCurrent, Fields::EnergyMax);
+			pinToMax(Fields::ShieldSet, Fields::ShieldCurrent, Fields::ShieldMax);
 
 			// --- Hazards: hold at minimum -------------------------------------
 			// These count *up* to kill you, so their floor is the safe end.
-			auto pinToMin = [&](auto* set, auto memberCurrent, auto memberMin)
+			auto pinToMin = [&](const auto& setField, const auto& currentField, const auto& boundField)
 			{
-				if (!set) return;
-				PinTo(set->*memberCurrent, set->*memberMin);
+				auto* set     = Fields::ValueOr(setField, character);
+				auto* current = currentField.In(set);
+				auto* bound   = boundField.In(set);
+				if (!current || !bound) return;
+				PinTo(*current, *bound);
 				touchedAnything = true;
 			};
 
-			pinToMin(character->ToxicityAttributes,  &SDK::UCrToxicityAttributeSet::CurrentToxicity,   &SDK::UCrToxicityAttributeSet::MinToxicity);
-			pinToMin(character->RadiationAttributes, &SDK::UCrRadiationAttributeSet::CurrentRadiation, &SDK::UCrRadiationAttributeSet::MinRadiation);
-			pinToMin(character->HeatAttributes,      &SDK::UCrHeatAttributeSet::CurrentHeat,           &SDK::UCrHeatAttributeSet::MinHeat);
-			pinToMin(character->DrainAttributes,     &SDK::UCrDrainAttributeSet::CurrentDrain,         &SDK::UCrDrainAttributeSet::MinDrain);
-			pinToMin(character->CorrosionAttributes, &SDK::UCrCorrosionAttributeSet::CurrentCorrosion, &SDK::UCrCorrosionAttributeSet::MinCorrosion);
-			pinToMin(character->InfectionAttributes, &SDK::UCrInfectionAttributeSet::CurrentInfection, &SDK::UCrInfectionAttributeSet::MinInfection);
+			pinToMin(Fields::ToxicitySet, Fields::ToxicityCurrent, Fields::ToxicityMin);
+			pinToMin(Fields::RadiationSet, Fields::RadiationCurrent, Fields::RadiationMin);
+			pinToMin(Fields::HeatSet, Fields::HeatCurrent, Fields::HeatMin);
+			pinToMin(Fields::DrainSet, Fields::DrainCurrent, Fields::DrainMin);
+			pinToMin(Fields::CorrosionSet, Fields::CorrosionCurrent, Fields::CorrosionMin);
+			pinToMin(Fields::InfectionSet, Fields::InfectionCurrent, Fields::InfectionMin);
 
 			// Temperature is deliberately left alone. Unlike the others it is a
 			// band, not a bar -- its minimum means "freezing", which is every bit
@@ -125,12 +134,12 @@ namespace CameraControls::Vitals
 				{
 					LOG_DEBUG("Vitals: locking survival attributes "
 					          "(health=%d calories=%d hydration=%d oxygen=%d energy=%d shield=%d)",
-					          character->HealthAttributes    ? 1 : 0,
-					          character->CaloriesAttributes  ? 1 : 0,
-					          character->HydrationAttributes ? 1 : 0,
-					          character->OxygenAttributes    ? 1 : 0,
-					          character->EnergyAttributes    ? 1 : 0,
-					          character->ShieldAttributes    ? 1 : 0);
+					          Fields::ValueOr(Fields::HealthSet, character)    ? 1 : 0,
+					          Fields::ValueOr(Fields::CaloriesSet, character)  ? 1 : 0,
+					          Fields::ValueOr(Fields::HydrationSet, character) ? 1 : 0,
+					          Fields::ValueOr(Fields::OxygenSet, character)    ? 1 : 0,
+					          Fields::ValueOr(Fields::EnergySet, character)    ? 1 : 0,
+					          Fields::ValueOr(Fields::ShieldSet, character)    ? 1 : 0);
 				}
 				else
 				{

@@ -1,5 +1,6 @@
 #include "world_func.h"
 #include "plugin_helpers.h"
+#include "cameracontrols_fields.h"
 
 #include "Chimera_classes.hpp"
 
@@ -117,6 +118,12 @@ namespace CameraControls::WorldFunc
 					// and no stage durations, which starts and then never does
 					// anything. So the settings come from the rupture the game
 					// is already running -- which means there has to be one.
+					if (!CameraControlsFields::RupturePhase.On())
+					{
+						outMessage = "Rupture phase cues are unavailable on this game build";
+						return false;
+					}
+
 					if (!wave->IsWaveInProgress())
 					{
 						outMessage = "No rupture running -- put a Start rupture cue first";
@@ -124,7 +131,8 @@ namespace CameraControls::WorldFunc
 					}
 
 					SDK::FCrEnviroWaveSettings settings = wave->GetCurrentStageSettings();
-					if (!(settings.WaveSpeed > 0.0f))
+					const float* waveSpeed = CameraControlsFields::WaveSpeed.In(&settings);
+					if (!waveSpeed || !(*waveSpeed > 0.0f))
 					{
 						outMessage = "The running rupture reported no settings -- phase unchanged";
 						return false;

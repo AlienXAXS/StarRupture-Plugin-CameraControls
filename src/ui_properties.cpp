@@ -1,6 +1,7 @@
 #include "ui_properties.h"
 #include "ui_theme.h"
 #include "project_io.h"
+#include "cameracontrols_fields.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1295,7 +1296,9 @@ namespace CameraControls::UI::Properties
 
 			ui->Spacing();
 
+			ui->BeginDisabled(!CameraControlsFields::VitalsLock.On());
 			ui->Checkbox("Lock health, food and water", &state.options.lockVitals);
+			ui->EndDisabled();
 			HelpMarker(ui, "Holds health, food, water, oxygen, energy and shield at full, and "
 			               "the hazard meters (toxicity, radiation, heat, drain, corrosion, "
 			               "infection) at zero, for as long as the editor is open.\n\n"

@@ -166,6 +166,7 @@
   <ItemGroup>
     <ClInclude Include="$(PluginSDKInclude)\plugin_interface.h" />
     <ClInclude Include="plugin.h" />
+    <ClInclude Include="cameracontrols_fields.h" />
     <ClInclude Include="plugin_config.h" />
     <ClInclude Include="plugin_helpers.h" />
     <ClInclude Include="json.hpp" />

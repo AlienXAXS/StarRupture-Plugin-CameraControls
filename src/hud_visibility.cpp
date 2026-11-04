@@ -1,6 +1,7 @@
 #include "hud_visibility.h"
 #include "plugin_config.h"
 #include "plugin_helpers.h"
+#include "cameracontrols_fields.h"
 
 #include "Engine_classes.hpp"
 #include "UMG_classes.hpp"
@@ -44,7 +45,7 @@ namespace CameraControls::Hud
 
 		SDK::UWorld* GetWorld()
 		{
-			try { return SDK::UWorld::GetWorld(); }
+			try { return PluginSdkRuntime::GetWorld(); }
 			catch (...) { return nullptr; }
 		}
 

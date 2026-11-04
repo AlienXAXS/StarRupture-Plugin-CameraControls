@@ -1,5 +1,6 @@
 #include "death_guard.h"
 #include "plugin_helpers.h"
+#include "cameracontrols_fields.h"
 
 #include "Engine_classes.hpp"
 #include "Chimera_classes.hpp"
@@ -39,7 +40,7 @@ namespace CameraControls::DeathGuard
 
 		SDK::UWorld* GetWorld()
 		{
-			try { return SDK::UWorld::GetWorld(); }
+			try { return PluginSdkRuntime::GetWorld(); }
 			catch (...) { return nullptr; }
 		}
 

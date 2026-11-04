@@ -1,6 +1,7 @@
 #include "fov_override.h"
 #include "cc_math.h"
 #include "plugin_helpers.h"
+#include "cameracontrols_fields.h"
 
 #include "AuCamera_classes.hpp"   // AAuPlayerCameraManager::StaticClass
 #include "Engine_classes.hpp"
@@ -8,31 +9,12 @@
 #include <cmath>
 #include <cstdint>
 
+namespace Fields = CameraControlsFields;
+
 namespace CameraControls::FovOverride
 {
 	namespace
 	{
-		// `AAuPlayerCameraManager::FOV` and `::AdditionalFOVOffset`. Neither is a
-		// UPROPERTY, so the generated class knows the whole run of them only as
-		// `Pad_28F8[0x118]` between `DefaultCameraSettings` (0x28A8) and
-		// `CurrentConfig` (0x2A10).
-		//
-		// The offsets are measured from `UpdateViewTarget`, not guessed, and they
-		// corroborate each other: that one function touches the manager's live
-		// mirror of `FAuCameraConfig` in the struct's own field order --
-		//
-		//     0x295C YOffset        0x2968 SocketOffset (FVector)
-		//     0x2960 ZOffset        0x2980 TargetOffset (FVector)
-		//     0x2964 TargetArmLenght
-		//     0x2998 FOV            0x299C AdditionalFOVOffset
-		//
-		// -- and the same function reads `CurrentConfig.InterpolationSpeed` at
-		// 0x2A54, which is 0x2A10 + 0x44, matching the offset the generated header
-		// gives `CurrentConfig` and the layout it gives `FAuCameraConfig`. The
-		// arithmetic only closes if the run starts where we think it does.
-		constexpr int kFovOffset           = 0x2998;
-		constexpr int kAdditionalFovOffset = 0x299C;
-
 		// A camera angle, loosely. Only wide enough to catch "this is not a float
 		// that could be an FOV at all" -- a pointer, an FName, a count.
 		constexpr float kMinPlausibleFov = 1.0f;
@@ -58,7 +40,7 @@ namespace CameraControls::FovOverride
 		{
 			try
 			{
-				SDK::UWorld* world = SDK::UWorld::GetWorld();
+				SDK::UWorld* world = PluginSdkRuntime::GetWorld();
 				if (!world)
 					return nullptr;
 
@@ -76,18 +58,6 @@ namespace CameraControls::FovOverride
 			{
 				return nullptr;
 			}
-		}
-
-		float Read(SDK::AAuPlayerCameraManager* manager, int offset)
-		{
-			return *reinterpret_cast<const float*>(
-				reinterpret_cast<const uint8_t*>(manager) + offset);
-		}
-
-		void Write(SDK::AAuPlayerCameraManager* manager, int offset, float value)
-		{
-			*reinterpret_cast<float*>(
-				reinterpret_cast<uint8_t*>(manager) + offset) = value;
 		}
 
 		bool PlausibleAngle(float fov)
@@ -120,7 +90,7 @@ namespace CameraControls::FovOverride
 		}
 	}
 
-	bool IsSupported() { return g_supported; }
+	bool IsSupported() { return g_supported && Fields::FovControl.On(); }
 	bool IsEngaged()   { return g_engaged; }
 
 	void ForgetWorldState()
@@ -136,7 +106,7 @@ namespace CameraControls::FovOverride
 		if (g_engaged)
 			return true;
 
-		if (!g_supported)
+		if (!IsSupported())
 			return false;
 
 		SDK::AAuPlayerCameraManager* manager = GetManager();
@@ -149,8 +119,18 @@ namespace CameraControls::FovOverride
 
 		try
 		{
-			const float fov      = Read(manager, kFovOffset);
-			const float offset   = Read(manager, kAdditionalFovOffset);
+			const float* fovAt    = Fields::Fov.In(manager);
+			const float* offsetAt = Fields::AdditionalFovOffset.In(manager);
+			if (!fovAt || !offsetAt)
+			{
+				g_supported = false;
+				LOG_ERROR("FovOverride: the loader has no FOV members for this game build -- FOV "
+				          "control is disabled for this session");
+				return false;
+			}
+
+			const float fov      = *fovAt;
+			const float offset   = *offsetAt;
 			const float reported = manager->GetFOVAngle();
 
 			if (!Validate(fov, offset, reported))
@@ -161,7 +141,7 @@ namespace CameraControls::FovOverride
 				          "%.3f + offset %.3f is %.3f, but the engine reports %.3f. FOV "
 				          "control is disabled for this session rather than writing over "
 				          "whatever is really there.",
-				          kFovOffset, fov, offset, fov + offset, reported);
+				          Fields::Fov.offset, fov, offset, fov + offset, reported);
 				return false;
 			}
 
@@ -194,7 +174,12 @@ namespace CameraControls::FovOverride
 		try
 		{
 			const float wanted = Clamp(fov, 5.0f, 170.0f);
-			const float live   = Read(manager, kFovOffset);
+			float* fovAt        = Fields::Fov.In(manager);
+			float* additionalAt = Fields::AdditionalFovOffset.In(manager);
+			if (!fovAt || !additionalAt)
+				return;
+
+			const float live   = *fovAt;
 
 			// Re-checked every frame rather than trusted from Engage: the manager
 			// interpolates this field, and reading it live is what makes the offset
@@ -202,7 +187,7 @@ namespace CameraControls::FovOverride
 			if (!PlausibleAngle(live))
 				return;
 
-			Write(manager, kAdditionalFovOffset, wanted - live);
+			*additionalAt = wanted - live;
 
 			// Did it take? `GetFOVAngle` is last composite's answer, so it lags a
 			// frame -- which is why this only judges a *settled* FOV. A value the
@@ -250,8 +235,11 @@ namespace CameraControls::FovOverride
 		{
 			try
 			{
-				Write(manager, kAdditionalFovOffset, g_saved);
-				LOG_DEBUG("FovOverride: AdditionalFOVOffset restored to %.2f", g_saved);
+				if (float* additionalAt = Fields::AdditionalFovOffset.In(manager))
+				{
+					*additionalAt = g_saved;
+					LOG_DEBUG("FovOverride: AdditionalFOVOffset restored to %.2f", g_saved);
+				}
 			}
 			catch (...)
 			{
