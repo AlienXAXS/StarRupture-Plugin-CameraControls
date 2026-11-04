@@ -33,12 +33,12 @@ namespace CameraControls::UI::Editor
 		// which nobody can see.
 		PluginWindowHints g_timelineHints = {
 			900.0f, 260.0f, 0.0f, 500.0f, 0.0f, 0.0f, /*size_cond*/0, /*pos_cond*/0,
-			PluginWindowFlags_NoResize | PluginWindowFlags_NoMove | PluginWindowFlags_NoSavedSettings
+			PluginWindowFlags_NoResize | PluginWindowFlags_NoMove | PluginWindowFlags_NoSavedSettings | PluginWindowFlags_PauseMenuMouseInputs
 		};
 
 		PluginWindowHints g_propertiesHints = {
 			380.0f, 700.0f, 900.0f, 0.0f, 0.0f, 0.0f, 0, 0,
-			PluginWindowFlags_NoResize | PluginWindowFlags_NoMove | PluginWindowFlags_NoSavedSettings
+			PluginWindowFlags_NoResize | PluginWindowFlags_NoMove | PluginWindowFlags_NoSavedSettings | PluginWindowFlags_PauseMenuMouseInputs
 		};
 
 		PluginWindowHints g_overlayHints = {
@@ -57,7 +57,7 @@ namespace CameraControls::UI::Editor
 		PluginWindowHints g_noticeHints = {
 			520.0f, 300.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0,
 			PluginWindowFlags_NoResize | PluginWindowFlags_NoMove |
-			PluginWindowFlags_NoSavedSettings
+			PluginWindowFlags_NoSavedSettings | PluginWindowFlags_PauseMenuMouseInputs
 		};
 
 		// Recomputed every frame from GetDisplaySize.
