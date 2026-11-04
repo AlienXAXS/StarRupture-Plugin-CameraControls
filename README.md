@@ -311,3 +311,9 @@ This is a client-only plugin — there is no camera to drive on a dedicated serv
 | [`src/viewport_fit.{h,cpp}`](src/viewport_fit.h) | Masking the game's 3D view in beside the panels |
 | [`src/project_io.{h,cpp}`](src/project_io.h) | JSON project save / load |
 | [`src/ui_*.{h,cpp}`](src/ui_editor.h) | Timeline widget, property inspector, viewport picking, overlays, theme |
+
+## Credits
+
+Original mod by [@AlienXAXS](https://github.com/AlienXAXS).
+
+Maintained by [@msantoro12](https://github.com/msantoro12).
