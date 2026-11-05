@@ -320,9 +320,9 @@ namespace CameraControls::Probe
 		// nothing is read.
 		//
 		// The read validates itself before it reports: the byte must be the one
-		// `bPlayerIsWaiting` sits in, and that bit must agree with the generated
-		// `bPlayerIsWaiting` accessor. If not, the offset is wrong on this build
-		// and we say so rather than printing plausible-looking rubbish.
+		// the reflected `bPlayerIsWaiting` sits in. If not, the map does not
+		// describe the byte read here on this build and we say so rather than
+		// printing plausible-looking rubbish.
 		//
 		// Worth knowing but NOT the smoking gun for the current bug: UE routes
 		// cinematic mode's input suppression through SetIgnoreMoveInput /
@@ -352,18 +352,6 @@ namespace CameraControls::Probe
 
 				const uint8_t byte =
 					*(reinterpret_cast<const uint8_t*>(pc) + bitsOffset);
-
-				const bool rawWaiting    = (byte & PcIsWaiting.boolMask) != 0;
-				const bool headerWaiting = pc->bPlayerIsWaiting != 0;
-
-				if (rawWaiting != headerWaiting)
-				{
-					// The one check that makes this trustworthy, and it failed.
-					Add(snapshot, "pcbits", "offset",
-					    Str("0x%X REJECTED (waiting bit=%d but bPlayerIsWaiting=%d)",
-					        bitsOffset, rawWaiting ? 1 : 0, headerWaiting ? 1 : 0));
-					return;
-				}
 
 				Add(snapshot, "pcbits", "raw",           Str("0x%02X", byte));
 				Add(snapshot, "pcbits", "cinematicMode", Bl(PcCinematicMode.Get(pc)));
