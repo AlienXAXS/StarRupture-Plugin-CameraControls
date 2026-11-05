@@ -83,6 +83,25 @@ namespace CameraControlsFields
 		{ 127004, kSizeOffset, sizeof(SDK::FVector2D), 0, nullptr },
 	};
 
+	// `APlayerController::bCinematicMode` and `::bHidePawnInCinematicMode`.
+	// Neither is a UPROPERTY, so the generated class knows them only as the
+	// low bits of `BitPad_4D0_0 : 4`, and each is a native bitfield: the
+	// loader's row holds the byte and the mask. They share their byte with the
+	// reflected `bPlayerIsWaiting`, which the control probe uses to check that
+	// the byte it reads is the one it means.
+	inline auto PcCinematicMode = PluginBitField{ { "APlayerController::bCinematicMode",
+		"APlayerController", "bCinematicMode", PLUGIN_FIELD_NATIVE | PLUGIN_FIELD_BITFIELD, 1, -1 } };
+	inline auto PcCinematicHidePlayer = PluginBitField{ { "APlayerController::bHidePawnInCinematicMode",
+		"APlayerController", "bHidePawnInCinematicMode", PLUGIN_FIELD_NATIVE | PLUGIN_FIELD_BITFIELD, 1, -1 } };
+	inline auto PcIsWaiting = SR_BITFIELD(APlayerController, bPlayerIsWaiting);
+
+	inline const PluginFieldCandidate kCinematicModeRows[] = {
+		{ 127004, 0x4D0, 1, 0x02, nullptr },
+	};
+	inline const PluginFieldCandidate kCinematicHidePlayerRows[] = {
+		{ 127004, 0x4D0, 1, 0x04, nullptr },
+	};
+
 	// -------------------------------------------------------------------
 	// Reflected members
 	// -------------------------------------------------------------------
@@ -193,6 +212,8 @@ namespace CameraControlsFields
 		{ "Safety.LockVitals" } };
 	inline PluginMap::Feature RupturePhase{ "rupture", "Rupture phase cues",
 		{ "FCrEnviroWaveSettings::WaveSpeed", "FCrEnviroWaveSettings" }, {} };
+	inline PluginMap::Feature CinematicBits{ "pcbits", "Cinematic mode bits in the input diagnostics",
+		PluginMap::KeysOf(PcCinematicMode, PcCinematicHidePlayer, PcIsWaiting), {} };
 	inline PluginMap::Feature ControlProbe{ "probe", "Input diagnostics",
 		{ "ACrCharacterPlayerBase::bIsDisabledPawn", "ACrCharacterPlayerBase::InteractionState",
 		  "ACrCharacterPlayerBase::bDead", "ACrCharacterPlayerBase::bOnLadder",
@@ -210,7 +231,7 @@ namespace CameraControlsFields
 	inline void DeclareFeatures(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
 		PluginMap::DeclareFeatures(scanner, self,
-			FovControl, ViewportMask, VitalsLock, RupturePhase, ControlProbe);
+			FovControl, ViewportMask, VitalsLock, RupturePhase, ControlProbe, CinematicBits);
 	}
 
 	// Asks the loader for every row above. False when any did not resolve; the
@@ -226,6 +247,8 @@ namespace CameraControlsFields
 		nativeOk = native(AdditionalFovOffset, kAdditionalFovRows, std::size(kAdditionalFovRows)) && nativeOk;
 		nativeOk = native(LocalPlayerOrigin, kOriginRows, std::size(kOriginRows)) && nativeOk;
 		nativeOk = native(LocalPlayerSize, kSizeRows, std::size(kSizeRows)) && nativeOk;
+		nativeOk = native(PcCinematicMode, kCinematicModeRows, std::size(kCinematicModeRows)) && nativeOk;
+		nativeOk = native(PcCinematicHidePlayer, kCinematicHidePlayerRows, std::size(kCinematicHidePlayerRows)) && nativeOk;
 
 		return PluginMap::ResolveFields(scanner, self,
 			ContextualInputBindings, ExclusiveInputBindings, DefaultInputMappings,
@@ -240,7 +263,7 @@ namespace CameraControlsFields
 			CharBuildingDrone, CharController,
 			PcMenuBlockers, PcInPauseMenu, PcPreviousPawn, PcMainCharacter, PcInteractable,
 			PcActiveInteract, PcZipline, PcBuildTarget,
-			WaveSpeed, WaveSettingsSize, BindingSize, MappingSize) && nativeOk;
+			PcIsWaiting, WaveSpeed, WaveSettingsSize, BindingSize, MappingSize) && nativeOk;
 	}
 
 	// The member's value, or a fallback when the object is null or the member

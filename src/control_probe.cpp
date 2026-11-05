@@ -313,10 +313,16 @@ namespace CameraControls::Probe
 		// a bit with a guess is how a diagnostic starts lying -- "bit3 no -> yes"
 		// in a diff is enough to go and find out which one it is.
 		//
-		// The read validates itself before it reports: bit 4 of the byte must agree
-		// with the generated `bPlayerIsWaiting` accessor, which sits in the same
-		// byte. If they disagree the offset is wrong on this build and we say so
-		// rather than printing plausible-looking rubbish.
+		// The byte and the two named bits come from the loader's map
+		// (CameraControlsFields::PcCinematicMode and PcCinematicHidePlayer), so a
+		// game update that moves them is a map row and not a new plugin build. A
+		// build the map has no row for turns this part off (CinematicBits) and
+		// nothing is read.
+		//
+		// The read validates itself before it reports: the byte must be the one
+		// `bPlayerIsWaiting` sits in, and that bit must agree with the generated
+		// `bPlayerIsWaiting` accessor. If not, the offset is wrong on this build
+		// and we say so rather than printing plausible-looking rubbish.
 		//
 		// Worth knowing but NOT the smoking gun for the current bug: UE routes
 		// cinematic mode's input suppression through SetIgnoreMoveInput /
@@ -326,30 +332,42 @@ namespace CameraControls::Probe
 		// -------------------------------------------------------------------
 		void CaptureControllerBits(SDK::APlayerController* pc, Snapshot& snapshot)
 		{
-			constexpr int kBitsOffset      = 0x4D0;
-			constexpr int kWaitingBitIndex = 4;
+			using namespace CameraControlsFields;
+
+			if (!CinematicBits.On())
+				return;
 
 			try
 			{
-				const uint8_t byte =
-					*(reinterpret_cast<const uint8_t*>(pc) + kBitsOffset);
+				const int bitsOffset = PcCinematicMode.offset;
 
-				const bool rawWaiting    = (byte & (1u << kWaitingBitIndex)) != 0;
+				// The three members share one byte; a map that puts them in
+				// different bytes is not describing the byte read here.
+				if (bitsOffset < 0 || PcCinematicHidePlayer.offset != bitsOffset
+				    || PcIsWaiting.offset != bitsOffset)
+				{
+					Add(snapshot, "pcbits", "offset", "unavailable");
+					return;
+				}
+
+				const uint8_t byte =
+					*(reinterpret_cast<const uint8_t*>(pc) + bitsOffset);
+
+				const bool rawWaiting    = (byte & PcIsWaiting.boolMask) != 0;
 				const bool headerWaiting = pc->bPlayerIsWaiting != 0;
 
 				if (rawWaiting != headerWaiting)
 				{
 					// The one check that makes this trustworthy, and it failed.
 					Add(snapshot, "pcbits", "offset",
-					    Str("0x%X REJECTED (bit%d=%d but bPlayerIsWaiting=%d)",
-					        kBitsOffset, kWaitingBitIndex, rawWaiting ? 1 : 0,
-					        headerWaiting ? 1 : 0));
+					    Str("0x%X REJECTED (waiting bit=%d but bPlayerIsWaiting=%d)",
+					        bitsOffset, rawWaiting ? 1 : 0, headerWaiting ? 1 : 0));
 					return;
 				}
 
 				Add(snapshot, "pcbits", "raw",           Str("0x%02X", byte));
-				Add(snapshot, "pcbits", "cinematicMode", Bl((byte & 0x02) != 0));
-				Add(snapshot, "pcbits", "cinemaHidePlayer", Bl((byte & 0x04) != 0));
+				Add(snapshot, "pcbits", "cinematicMode", Bl(PcCinematicMode.Get(pc)));
+				Add(snapshot, "pcbits", "cinemaHidePlayer", Bl(PcCinematicHidePlayer.Get(pc)));
 				Add(snapshot, "pcbits", "bit0",          Bl((byte & 0x01) != 0));
 				Add(snapshot, "pcbits", "bit3",          Bl((byte & 0x08) != 0));
 			}
