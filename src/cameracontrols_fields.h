@@ -95,11 +95,16 @@ namespace CameraControlsFields
 		"APlayerController", "bHidePawnInCinematicMode", PLUGIN_FIELD_NATIVE | PLUGIN_FIELD_BITFIELD, 1, -1 } };
 	inline auto PcIsWaiting = SR_BITFIELD(APlayerController, bPlayerIsWaiting);
 
+	// The byte and masks on each game build CameraControls supports (the same on
+	// both, measured from the PDBs). The loader's own row for the running build
+	// wins when it has one.
 	inline const PluginFieldCandidate kCinematicModeRows[] = {
 		{ 127004, 0x4D0, 1, 0x02, nullptr },
+		{ 128786, 0x4D0, 1, 0x02, nullptr },
 	};
 	inline const PluginFieldCandidate kCinematicHidePlayerRows[] = {
 		{ 127004, 0x4D0, 1, 0x04, nullptr },
+		{ 128786, 0x4D0, 1, 0x04, nullptr },
 	};
 
 	// -------------------------------------------------------------------
