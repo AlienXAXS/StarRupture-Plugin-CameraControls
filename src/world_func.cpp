@@ -56,14 +56,9 @@ namespace CameraControls::WorldFunc
 		// The rupture settings struct crosses ProcessEvent twice: out of
 		// GetCurrentStageSettings and back into StartWaveCustom. Neither call goes
 		// through the SDK's wrappers, which copy it as a compiled struct. The
-		// parameter block is the function's live parameter size, and the struct in
-		// it is the running build's size (PluginMap::ParamsBlock). Each function
-		// takes the settings as its last parameter, so its offset is the end of
-		// the parameters before it, rounded up to the struct's alignment.
-		constexpr uint32_t AlignUp(uint32_t value, uint32_t alignment)
-		{
-			return (value + alignment - 1) & ~(alignment - 1);
-		}
+		// parameter block is the function's live parameter size, and each
+		// parameter in it is at the offset and size the running game reflects
+		// (PluginMap::ParamsBlockOf).
 
 		SDK::UFunction* WaveFunction(SDK::UCrEnviroWaveSubsystem* wave, const char* name)
 		{
@@ -92,8 +87,8 @@ namespace CameraControls::WorldFunc
 			if (!function)
 				return PluginMap::ParamsBlock(0, {});
 
-			PluginMap::ParamsBlock call(static_cast<uint32_t>(function->Size),
-				{ { "ReturnValue", 0, CameraControlsFields::WaveSettingsSize.resolvedSize } });
+			PluginMap::ParamsBlock call = PluginMap::ParamsBlockOf(
+				CameraControlsFields::StageSettingsSize, { &CameraControlsFields::StageSettingsReturn });
 			if (!CallWave(wave, function, call))
 				return PluginMap::ParamsBlock(0, {});
 			return call;
@@ -108,13 +103,16 @@ namespace CameraControls::WorldFunc
 				"StartWaveCustom parameter block: the two enums are one byte each");
 
 			SDK::UFunction* function = WaveFunction(wave, "StartWaveCustom");
-			const uint32_t settingsSize = CameraControlsFields::WaveSettingsSize.resolvedSize;
-			if (!function || !settings || settingsSize == 0)
+			const uint32_t settingsSize = CameraControlsFields::StartWaveSettings.resolvedSize;
+			if (!function || !settings || settingsSize == 0
+				|| CameraControlsFields::StartWaveType.resolvedSize != 1
+				|| CameraControlsFields::StartWaveStage.resolvedSize != 1
+				|| settingsSize != CameraControlsFields::StageSettingsReturn.resolvedSize)
 				return false;
 
-			PluginMap::ParamsBlock call(static_cast<uint32_t>(function->Size), {
-				{ "WaveType", 0, 1 }, { "WaveStage", 1, 1 },
-				{ "WaveSettings", AlignUp(2, alignof(SDK::FCrEnviroWaveSettings)), settingsSize } });
+			PluginMap::ParamsBlock call = PluginMap::ParamsBlockOf(CameraControlsFields::StartWaveSize,
+				{ &CameraControlsFields::StartWaveType, &CameraControlsFields::StartWaveStage,
+				  &CameraControlsFields::StartWaveSettings });
 			if (!call)
 				return false;
 

@@ -4,6 +4,7 @@
 #include "Engine_classes.hpp"
 #include "Chimera_classes.hpp"
 #include "Chimera_structs.hpp"
+#include "Chimera_parameters.hpp"
 #include "plugin_map.h"
 
 #include <cstdint>
@@ -176,14 +177,22 @@ namespace CameraControlsFields
 	inline auto PcBuildTarget      = CC_FIELD(ACrPlayerControllerBase, CurrentBuildingTarget);
 
 	// The rupture settings block comes back from the running wave and goes back
-	// into StartWaveCustom through ProcessEvent parameter blocks sized from this
-	// row (PluginMap::ParamsBlock), and the contextual bindings are the value of
-	// a TMap walked at the stride this row gives (PluginMap::ScriptMapView). Both
-	// sizes are the running build's, so a build that resizes either struct does
-	// not turn the plugin off.
+	// into StartWaveCustom through ProcessEvent parameter blocks built from the
+	// rows below (PluginMap::ParamsBlockOf), and the contextual bindings are the
+	// value of a TMap walked at the stride the second row gives
+	// (PluginMap::ScriptMapView). The sizes are the running build's, so a build
+	// that resizes either struct does not turn the plugin off.
 	inline auto WaveSpeed         = CC_FIELD(FCrEnviroWaveSettings, WaveSpeed);
-	inline auto WaveSettingsSize  = SR_SIZE(FCrEnviroWaveSettings);
 	inline auto BindingSize       = SR_SIZE(FCrContextualInputBinding);
+
+	// The two calls that carry the settings struct: each parameter's offset and
+	// size and each function's parameter block size are the running game's.
+	inline auto StageSettingsSize    = SR_PARAMS_SIZE(CrEnviroWaveSubsystem, GetCurrentStageSettings);
+	inline auto StageSettingsReturn  = SR_PARAM(CrEnviroWaveSubsystem, GetCurrentStageSettings, ReturnValue);
+	inline auto StartWaveSize        = SR_PARAMS_SIZE(CrEnviroWaveSubsystem, StartWaveCustom);
+	inline auto StartWaveType        = SR_PARAM(CrEnviroWaveSubsystem, StartWaveCustom, WaveType);
+	inline auto StartWaveStage       = SR_PARAM(CrEnviroWaveSubsystem, StartWaveCustom, WaveStage);
+	inline auto StartWaveSettings    = SR_PARAM(CrEnviroWaveSubsystem, StartWaveCustom, WaveSettings);
 
 	// The default mappings array is only stepped, by the size the running build
 	// reports (PluginMap::ElementAt).
@@ -214,7 +223,9 @@ namespace CameraControlsFields
 		  "ACrCharacterPlayerBase::InfectionAttributes", "UCrInfectionAttributeSet::CurrentInfection", "UCrInfectionAttributeSet::MinInfection" },
 		{ "Safety.LockVitals" } };
 	inline PluginMap::Feature RupturePhase{ "rupture", "Rupture phase cues",
-		{ "FCrEnviroWaveSettings::WaveSpeed", "FCrEnviroWaveSettings" }, {} };
+		PluginMap::KeysOf("FCrEnviroWaveSettings::WaveSpeed",
+			StageSettingsSize, StageSettingsReturn,
+			StartWaveSize, StartWaveType, StartWaveStage, StartWaveSettings), {} };
 	inline PluginMap::Feature CinematicBits{ "pcbits", "Cinematic mode bits in the input diagnostics",
 		PluginMap::KeysOf(PcCinematicMode, PcCinematicHidePlayer, PcIsWaiting), {} };
 	inline PluginMap::Feature ControlProbe{ "probe", "Input diagnostics",
@@ -266,7 +277,9 @@ namespace CameraControlsFields
 			CharBuildingDrone, CharController,
 			PcMenuBlockers, PcInPauseMenu, PcPreviousPawn, PcMainCharacter, PcInteractable,
 			PcActiveInteract, PcZipline, PcBuildTarget,
-			PcIsWaiting, WaveSpeed, WaveSettingsSize, BindingSize, MappingSize) && nativeOk;
+			PcIsWaiting, WaveSpeed, BindingSize, MappingSize,
+			StageSettingsSize, StageSettingsReturn,
+			StartWaveSize, StartWaveType, StartWaveStage, StartWaveSettings) && nativeOk;
 	}
 
 	// The member's value, or a fallback when the object is null or the member

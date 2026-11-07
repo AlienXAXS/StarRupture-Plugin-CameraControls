@@ -4,3 +4,4 @@
 - Bug reports now go to GitHub issues, linked from the README
 - Needs ModLoader v1.23.0 or later
 - The editor's notice, timeline and properties panels work while the inventory or Escape menu is open
+- The rupture phase cues read the game's function parameters from the running game, so they keep working after game updates
