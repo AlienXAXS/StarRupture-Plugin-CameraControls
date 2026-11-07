@@ -1,3 +1,4 @@
+- The rupture phase cues and the input re-bind use the running game's data sizes, so they keep working after game updates
 - Reads the camera's screen position from the loader's map, so it keeps working after game updates
 - After a game update, a camera tool whose game data moved turns itself off instead of the whole plugin
 - Bug reports now go to GitHub issues, linked from the README

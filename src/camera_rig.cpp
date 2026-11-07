@@ -79,6 +79,18 @@ namespace CameraControls::Rig
 		// only number that means "healthy" is the one this session started with.
 		int g_mappingsAtActivate = -1;
 
+		// The hero component's TMap<FGameplayTag, FCrContextualInputBinding> members,
+		// walked at the stride the running build's value size gives. The SDK's own
+		// TMap steps by the compiled FCrContextualInputBinding size, which is wrong
+		// the moment the game resizes it. Empty (and false) when the layout is not
+		// the container's: the caller then leaves the map alone.
+		PluginMap::ScriptMapView ViewBindings(const void* map)
+		{
+			return PluginMap::ScriptMapView(map, PluginMap::MapLayout(
+				sizeof(SDK::FGameplayTag), alignof(SDK::FGameplayTag),
+				CameraControlsFields::BindingSize.resolvedSize, alignof(SDK::FCrContextualInputBinding)));
+		}
+
 		bool BindOneInputConfig(SDK::UCrHeroComponent* hero, const char* wanted, bool logIt);
 
 		// Re-binds every config in kPlayerInputConfigTags. Returns false only if none
@@ -109,7 +121,7 @@ namespace CameraControls::Rig
 		// contextual config with that tag.
 		bool BindOneInputConfig(SDK::UCrHeroComponent* hero, const char* wanted, bool logIt)
 		{
-			auto* bindings = CameraControlsFields::ContextualInputBindings.In(hero);
+			const auto* bindings = CameraControlsFields::ContextualInputBindings.In(hero);
 			if (!bindings)
 			{
 				if (logIt)
@@ -117,15 +129,25 @@ namespace CameraControls::Rig
 				return false;
 			}
 
-			for (int i = 0; i < bindings->Num(); ++i)
+			const PluginMap::ScriptMapView map = ViewBindings(bindings);
+			if (!map)
 			{
-				if (!bindings->IsValidIndex(i))
-					continue;
+				if (logIt)
+					LOG_WARN("Rig: the pawn's contextual input bindings cannot be read on this build (%s)",
+					         map.ReasonText());
+				return false;
+			}
 
-				const SDK::FGameplayTag tag = (*bindings)[i].Key();
-				if (tag.TagName.ToString() != wanted)
-					continue;
-
+			SDK::FGameplayTag tag{};
+			if (map.Find([&](const uint8_t* key)
+			{
+				const SDK::FGameplayTag candidate = *reinterpret_cast<const SDK::FGameplayTag*>(key);
+				if (candidate.TagName.ToString() != wanted)
+					return false;
+				tag = candidate;
+				return true;
+			}))
+			{
 				if (logIt)
 					LOG_INFO("Rig: re-binding player input config '%s' (unbind, then bind)",
 					         wanted);
@@ -160,7 +182,7 @@ namespace CameraControls::Rig
 			if (logIt)
 			{
 				LOG_WARN("Rig: input config tag '%s' is not one of this pawn's %d contextual "
-				         "configs", wanted, bindings->Num());
+				         "configs", wanted, map.Num());
 			}
 
 			return false;
@@ -660,27 +682,30 @@ namespace CameraControls::Rig
 		if (!contextual || !exclusive || !defaults)
 			return;
 
-		const int contextualCount = contextual->Num();
-		const int exclusiveCount  = exclusive->Num();
+		const PluginMap::ScriptMapView contextualMap = ViewBindings(contextual);
+		const PluginMap::ScriptMapView exclusiveMap  = ViewBindings(exclusive);
+		if (!contextualMap || !exclusiveMap)
+		{
+			LOG_TRACE("Rig: hero component %p -- input configs cannot be read on this build (%s)",
+			          static_cast<void*>(hero),
+			          contextualMap ? exclusiveMap.ReasonText() : contextualMap.ReasonText());
+			return;
+		}
 
 		LOG_TRACE("Rig: hero component %p -- %d exclusive, %d contextual input configs",
-		          static_cast<void*>(hero), exclusiveCount, contextualCount);
+		          static_cast<void*>(hero), exclusiveMap.Num(), contextualMap.Num());
 
-		for (int i = 0; i < contextualCount; ++i)
+		contextualMap.ForEach([](uint8_t* key, uint8_t*)
 		{
-			if (!contextual->IsValidIndex(i))
-				continue;
+			LOG_TRACE("Rig:   contextual config tag '%s'",
+			          reinterpret_cast<const SDK::FGameplayTag*>(key)->TagName.ToString().c_str());
+		});
 
-			LOG_TRACE("Rig:   contextual config tag '%s'", (*contextual)[i].Key().TagName.ToString().c_str());
-		}
-
-		for (int i = 0; i < exclusiveCount; ++i)
+		exclusiveMap.ForEach([](uint8_t* key, uint8_t*)
 		{
-			if (!exclusive->IsValidIndex(i))
-				continue;
-
-			LOG_TRACE("Rig:   exclusive config tag '%s'", (*exclusive)[i].Key().TagName.ToString().c_str());
-		}
+			LOG_TRACE("Rig:   exclusive config tag '%s'",
+			          reinterpret_cast<const SDK::FGameplayTag*>(key)->TagName.ToString().c_str());
+		});
 
 		// The list `InitializePlayerInput` adds, straight from the component.
 		//

@@ -5,6 +5,7 @@
 #include "Chimera_classes.hpp"
 
 #include <cstdio>
+#include <cstring>
 
 namespace CameraControls::WorldFunc
 {
@@ -50,6 +51,77 @@ namespace CameraControls::WorldFunc
 			LOG_DEBUG("WorldFunc: resolved %s at %p (%d instance(s))",
 			          kWaveSubsystemClass, static_cast<void*>(g_wave), found);
 			return g_wave;
+		}
+
+		// The rupture settings struct crosses ProcessEvent twice: out of
+		// GetCurrentStageSettings and back into StartWaveCustom. Neither call goes
+		// through the SDK's wrappers, which copy it as a compiled struct. The
+		// parameter block is the function's live parameter size, and the struct in
+		// it is the running build's size (PluginMap::ParamsBlock). Each function
+		// takes the settings as its last parameter, so its offset is the end of
+		// the parameters before it, rounded up to the struct's alignment.
+		constexpr uint32_t AlignUp(uint32_t value, uint32_t alignment)
+		{
+			return (value + alignment - 1) & ~(alignment - 1);
+		}
+
+		SDK::UFunction* WaveFunction(SDK::UCrEnviroWaveSubsystem* wave, const char* name)
+		{
+			return wave && wave->Class ? wave->Class->GetFunction("CrEnviroWaveSubsystem", name) : nullptr;
+		}
+
+		// ProcessEvent the way the SDK's own wrappers do it: the function is marked
+		// native for the call and handed back as it was.
+		bool CallWave(SDK::UCrEnviroWaveSubsystem* wave, SDK::UFunction* function, PluginMap::ParamsBlock& block)
+		{
+			if (!wave || !function || !block)
+				return false;
+			const auto flags = function->FunctionFlags;
+			function->FunctionFlags |= 0x400;
+			const bool called = PluginMap::Call(wave, function, block);
+			function->FunctionFlags = flags;
+			return called;
+		}
+
+		// The running rupture's settings, in a block of the live size; the struct
+		// is at "ReturnValue". The block is empty when the function, the size or
+		// the call is not there.
+		PluginMap::ParamsBlock CurrentStageSettings(SDK::UCrEnviroWaveSubsystem* wave)
+		{
+			SDK::UFunction* function = WaveFunction(wave, "GetCurrentStageSettings");
+			if (!function)
+				return PluginMap::ParamsBlock(0, {});
+
+			PluginMap::ParamsBlock call(static_cast<uint32_t>(function->Size),
+				{ { "ReturnValue", 0, CameraControlsFields::WaveSettingsSize.resolvedSize } });
+			if (!CallWave(wave, function, call))
+				return PluginMap::ParamsBlock(0, {});
+			return call;
+		}
+
+		// StartWaveCustom(type, stage, settings), with `settings` the struct bytes
+		// CurrentStageSettings returned.
+		bool StartWaveCustom(SDK::UCrEnviroWaveSubsystem* wave, SDK::EEnviroWave type,
+		                     SDK::EEnviroWaveStage stage, const void* settings)
+		{
+			static_assert(sizeof(SDK::EEnviroWave) == 1 && sizeof(SDK::EEnviroWaveStage) == 1,
+				"StartWaveCustom parameter block: the two enums are one byte each");
+
+			SDK::UFunction* function = WaveFunction(wave, "StartWaveCustom");
+			const uint32_t settingsSize = CameraControlsFields::WaveSettingsSize.resolvedSize;
+			if (!function || !settings || settingsSize == 0)
+				return false;
+
+			PluginMap::ParamsBlock call(static_cast<uint32_t>(function->Size), {
+				{ "WaveType", 0, 1 }, { "WaveStage", 1, 1 },
+				{ "WaveSettings", AlignUp(2, alignof(SDK::FCrEnviroWaveSettings)), settingsSize } });
+			if (!call)
+				return false;
+
+			*call.Param("WaveType") = static_cast<uint8_t>(type);
+			*call.Param("WaveStage") = static_cast<uint8_t>(stage);
+			std::memcpy(call.Param("WaveSettings"), settings, settingsSize);
+			return CallWave(wave, function, call);
 		}
 	}
 
@@ -130,8 +202,9 @@ namespace CameraControls::WorldFunc
 						return false;
 					}
 
-					SDK::FCrEnviroWaveSettings settings = wave->GetCurrentStageSettings();
-					const float* waveSpeed = CameraControlsFields::WaveSpeed.In(&settings);
+					PluginMap::ParamsBlock current = CurrentStageSettings(wave);
+					const uint8_t* settings = current.Param("ReturnValue");
+					const float* waveSpeed = CameraControlsFields::WaveSpeed.In(settings);
 					if (!waveSpeed || !(*waveSpeed > 0.0f))
 					{
 						outMessage = "The running rupture reported no settings -- phase unchanged";
@@ -141,7 +214,11 @@ namespace CameraControls::WorldFunc
 					const SDK::EEnviroWaveStage stage =
 						static_cast<SDK::EEnviroWaveStage>(Clamp(frame.stage, 1, 4));
 
-					wave->StartWaveCustom(type, stage, settings);
+					if (!StartWaveCustom(wave, type, stage, settings))
+					{
+						outMessage = "The rupture phase could not be set on this game build";
+						return false;
+					}
 					snprintf(line, sizeof(line), "Rupture phase set to %s (%s)",
 					         RuptureStageName(frame.stage), RuptureTypeName(frame.waveType));
 					outMessage = line;

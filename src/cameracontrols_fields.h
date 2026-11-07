@@ -175,13 +175,15 @@ namespace CameraControlsFields
 	inline auto PcZipline          = CC_FIELD(ACrPlayerControllerBase, CurrentZipline);
 	inline auto PcBuildTarget      = CC_FIELD(ACrPlayerControllerBase, CurrentBuildingTarget);
 
-	// The rupture settings block is copied by value out of the running wave and
-	// back into StartWaveCustom, and the contextual bindings are the value of a
-	// TMap that the SDK walks with the compiled element size, so each is checked
-	// against the running build.
+	// The rupture settings block comes back from the running wave and goes back
+	// into StartWaveCustom through ProcessEvent parameter blocks sized from this
+	// row (PluginMap::ParamsBlock), and the contextual bindings are the value of
+	// a TMap walked at the stride this row gives (PluginMap::ScriptMapView). Both
+	// sizes are the running build's, so a build that resizes either struct does
+	// not turn the plugin off.
 	inline auto WaveSpeed         = CC_FIELD(FCrEnviroWaveSettings, WaveSpeed);
-	inline auto WaveSettingsSize  = SR_SIZE_CHECK(FCrEnviroWaveSettings);
-	inline auto BindingSize       = SR_SIZE_CHECK(FCrContextualInputBinding);
+	inline auto WaveSettingsSize  = SR_SIZE(FCrEnviroWaveSettings);
+	inline auto BindingSize       = SR_SIZE(FCrContextualInputBinding);
 
 	// The default mappings array is only stepped, by the size the running build
 	// reports (PluginMap::ElementAt).
