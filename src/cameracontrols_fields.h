@@ -48,7 +48,10 @@ namespace CameraControlsFields
 	// arithmetic only closes if the run starts where we think it does.
 	//
 	// Each is a field request: the loader's map holds the row per game build,
-	// and the built CL-127004 row below stands in when the map has none.
+	// and the built CL-127004 row below stands in when the map has none. The
+	// two ULocalPlayer members have no row of their own here: the map carries
+	// both on every supported build, and the offset in the request is only the
+	// one this plugin's SDK was generated with.
 
 	// `ULocalPlayer::Origin` and `::Size` -- two FVector2Ds, which are pairs of
 	// doubles in UE5. Neither is a UPROPERTY, so they land inside the
@@ -56,17 +59,14 @@ namespace CameraControlsFields
 	// Pad_80[0x38], then AspectRatioAxisConstraint at 0xB8. The engine's
 	// member order across that gap is Origin, Size, LastViewLocation, and
 	// 0x10 + 0x10 + 0x18 is exactly 0x38 -- the arithmetic only closes here.
-	constexpr int kOriginOffset = 0x80;
-	constexpr int kSizeOffset   = 0x90;
-
 	inline auto Fov = PluginField<float>{ { "AAuPlayerCameraManager::FOV",
 		"AAuPlayerCameraManager", "FOV", PLUGIN_FIELD_NATIVE, sizeof(float), 0x2998 } };
 	inline auto AdditionalFovOffset = PluginField<float>{ { "AAuPlayerCameraManager::AdditionalFOVOffset",
 		"AAuPlayerCameraManager", "AdditionalFOVOffset", PLUGIN_FIELD_NATIVE, sizeof(float), 0x299C } };
 	inline auto LocalPlayerOrigin = PluginField<SDK::FVector2D>{ { "ULocalPlayer::Origin",
-		"ULocalPlayer", "Origin", PLUGIN_FIELD_NATIVE, sizeof(SDK::FVector2D), kOriginOffset } };
+		"ULocalPlayer", "Origin", PLUGIN_FIELD_NATIVE, sizeof(SDK::FVector2D), 0x80 } };
 	inline auto LocalPlayerSize = PluginField<SDK::FVector2D>{ { "ULocalPlayer::Size",
-		"ULocalPlayer", "Size", PLUGIN_FIELD_NATIVE, sizeof(SDK::FVector2D), kSizeOffset } };
+		"ULocalPlayer", "Size", PLUGIN_FIELD_NATIVE, sizeof(SDK::FVector2D), 0x90 } };
 
 	// CL-127004's rows, the build this plugin was compiled against; every other
 	// build comes from the loader's map.
@@ -75,12 +75,6 @@ namespace CameraControlsFields
 	};
 	inline const PluginFieldCandidate kAdditionalFovRows[] = {
 		{ 127004, 0x299C, sizeof(float), 0, nullptr },
-	};
-	inline const PluginFieldCandidate kOriginRows[] = {
-		{ 127004, kOriginOffset, sizeof(SDK::FVector2D), 0, nullptr },
-	};
-	inline const PluginFieldCandidate kSizeRows[] = {
-		{ 127004, kSizeOffset, sizeof(SDK::FVector2D), 0, nullptr },
 	};
 
 	// `APlayerController::bCinematicMode` and `::bHidePawnInCinematicMode`.
@@ -182,14 +176,16 @@ namespace CameraControlsFields
 	inline auto PcBuildTarget      = CC_FIELD(ACrPlayerControllerBase, CurrentBuildingTarget);
 
 	// The rupture settings block is copied by value out of the running wave and
-	// back into StartWaveCustom, and the contextual bindings map is walked with
-	// the compiled element size, so each is checked against the running build.
+	// back into StartWaveCustom, and the contextual bindings are the value of a
+	// TMap that the SDK walks with the compiled element size, so each is checked
+	// against the running build.
 	inline auto WaveSpeed         = CC_FIELD(FCrEnviroWaveSettings, WaveSpeed);
 	inline auto WaveSettingsSize  = SR_SIZE_CHECK(FCrEnviroWaveSettings);
 	inline auto BindingSize       = SR_SIZE_CHECK(FCrContextualInputBinding);
 
-	// The default mappings array is walked with the compiled element size.
-	inline auto MappingSize       = SR_SIZE_CHECK(FInputMappingContextAndPriority);
+	// The default mappings array is only stepped, by the size the running build
+	// reports (PluginMap::ElementAt).
+	inline auto MappingSize       = SR_SIZE(FInputMappingContextAndPriority);
 
 	// The parts of the plugin that can be off while the rest runs. A member that
 	// does not resolve on a game build turns off the part that reads it, and the
@@ -250,8 +246,8 @@ namespace CameraControlsFields
 
 		bool nativeOk = native(Fov, kFovRows, std::size(kFovRows));
 		nativeOk = native(AdditionalFovOffset, kAdditionalFovRows, std::size(kAdditionalFovRows)) && nativeOk;
-		nativeOk = native(LocalPlayerOrigin, kOriginRows, std::size(kOriginRows)) && nativeOk;
-		nativeOk = native(LocalPlayerSize, kSizeRows, std::size(kSizeRows)) && nativeOk;
+		nativeOk = native(LocalPlayerOrigin, nullptr, 0) && nativeOk;
+		nativeOk = native(LocalPlayerSize, nullptr, 0) && nativeOk;
 		nativeOk = native(PcCinematicMode, kCinematicModeRows, std::size(kCinematicModeRows)) && nativeOk;
 		nativeOk = native(PcCinematicHidePlayer, kCinematicHidePlayerRows, std::size(kCinematicHidePlayerRows)) && nativeOk;
 

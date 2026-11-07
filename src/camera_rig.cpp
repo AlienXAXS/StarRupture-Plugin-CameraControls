@@ -696,9 +696,12 @@ namespace CameraControls::Rig
 
 		for (int i = 0; i < defaultCount; ++i)
 		{
-			const auto& entry = (*defaults)[i];
-			const auto* mapping  = DefaultMappingContext.In(static_cast<const void*>(&entry));
-			const auto* priority = DefaultMappingPriority.In(static_cast<const void*>(&entry));
+			const void* entry = PluginMap::ElementAt(*defaults, i, MappingSize);
+			if (!entry)
+				continue;
+
+			const auto* mapping  = DefaultMappingContext.In(entry);
+			const auto* priority = DefaultMappingPriority.In(entry);
 			if (!mapping || !priority)
 				continue;
 
