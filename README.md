@@ -280,12 +280,28 @@ the two disagreeing is one of the specific things worth catching.
   with. v52 also fixed a keybind bug where binding a bare `LeftShift`/`LeftControl` never fired, because Windows
   reports those as the generic `VK_SHIFT`/`VK_CONTROL` and the loader's key table only held the sided codes.
 - Visual Studio 2022 (MSVC v143, C++20) to build.
-- [StarRupture-Game-SDK](https://github.com/AlienXAXS/StarRupture-Game-SDK) and
-  [StarRupture-Plugin-SDK](https://github.com/AlienXAXS/StarRupture-Plugin-SDK) as sibling checkouts.
+- [StarRupture-Plugin-SDK](https://github.com/AlienXAXS/StarRupture-Plugin-SDK), next to this repo (see Building).
 
 After a game update that moves something the plugin reads, only the camera tool that depends on it switches off; the rest keeps working.
 
 ## Building
+
+Put the plugin next to `StarRupture-Plugin-SDK` and clone both with `--recursive`, so the game SDK submodules come along:
+
+```
+git clone --recursive https://github.com/AlienXAXS/StarRupture-Plugin-SDK.git
+git clone --recursive https://github.com/AlienXAXS/StarRupture-Plugin-CameraControls.git
+```
+
+```
+<parent folder>/
+├── StarRupture-Plugin-SDK/
+└── StarRupture-Plugin-CameraControls/
+```
+
+The game SDK comes from this plugin's own `StarRupture SDK` submodule when it has one, otherwise from the Plugin SDK's. To build against other folders, pass `/p:PluginSDKInclude=...` and `/p:GameSDKRoot=...` to msbuild.
+
+Then build:
 
 ```bat
 msbuild StarRupture-Plugin-CameraControls.sln /p:Configuration="Client Release" /p:Platform=x64
