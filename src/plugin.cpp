@@ -1596,7 +1596,7 @@ namespace
 		state.options.gizmoNearCull         = Clamp(Cfg::GizmoNearCull(), 0.0f, 5000.0f);
 		state.options.stashAltitude         = Clamp(Cfg::StashAltitude(), -200000.0f, 200000.0f);
 		state.options.showPlayerMarker      = Cfg::ShowPlayerMarker();
-		state.options.lockVitals            = CameraControlsFields::VitalsLock.On() && Cfg::LockVitals();
+		state.options.lockVitals            = Cfg::LockVitals();
 	}
 
 	// Writes the live Options back out, so settings tuned in the editor survive
