@@ -1477,8 +1477,14 @@ namespace
 
 		DeathGuard::Hold();
 
+		// The host can drop the vitals feature mid-session. Stop pinning at once
+		// and clear the flag; nothing is stored, so the game's own survival
+		// effects take over from wherever the values are. The player's setting
+		// stays as it was, so the lock resumes when the feature returns.
 		if (state.options.lockVitals && CameraControlsFields::VitalsLock.On())
 			Vitals::Pin();
+		else if (Vitals::IsActive())
+			Vitals::Stop();
 
 		if (state.options.protectPlayer)
 			Safeguard::Hold();
@@ -1590,7 +1596,7 @@ namespace
 		state.options.gizmoNearCull         = Clamp(Cfg::GizmoNearCull(), 0.0f, 5000.0f);
 		state.options.stashAltitude         = Clamp(Cfg::StashAltitude(), -200000.0f, 200000.0f);
 		state.options.showPlayerMarker      = Cfg::ShowPlayerMarker();
-		state.options.lockVitals            = CameraControlsFields::VitalsLock.On() && Cfg::LockVitals();
+		state.options.lockVitals            = Cfg::LockVitals();
 	}
 
 	// Writes the live Options back out, so settings tuned in the editor survive

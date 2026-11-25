@@ -1,0 +1,3 @@
+## Unreleased
+
+- Locking health, food and water now lets go when a host turns the feature off mid-session, and picks up again if it comes back and your setting is still on
