@@ -1,3 +1,2 @@
-- Locking health, food and water now lets go when a host turns the feature off mid-session, and picks up again if it comes back and your setting is still on
 - The input diagnostics read the controller's cinematic bits from the loader's version object map, not a built-in offset
 - The field of view and viewport tools take their game values from the version map alone, with no built-in values

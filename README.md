@@ -208,7 +208,7 @@ A person-sized marker is drawn at the stash point by default so you can see wher
 
 ### Locking health, food and water
 
-While the editor is open the plugin holds your health, food, water and the other vitals steady (the *Lock health, food and water* option). If the host turns this feature off mid-session, the lock stops at once and the game's normal vitals behaviour takes over; nothing is held back or restored. Your own setting is kept, so the lock resumes if the host turns the feature back on.
+While the editor is open the plugin holds your health, food, water and the other vitals steady (the *Lock health, food and water* option).
 
 ### Not dying
 
