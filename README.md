@@ -206,6 +206,10 @@ harmful:
 
 A person-sized marker is drawn at the stash point by default so you can see where it went.
 
+### Locking health, food and water
+
+While the editor is open the plugin holds your health, food, water and the other vitals steady (the *Lock health, food and water* option). If the host turns this feature off mid-session, the lock stops at once and the game's normal vitals behaviour takes over; nothing is held back or restored. Your own setting is kept, so the lock resumes if the host turns the feature back on.
+
 ### Not dying
 
 The game has kill triggers that do not drain a meter, they just kill: the world's own out-of-bounds plane, pain
@@ -274,7 +278,7 @@ the two disagreeing is one of the specific things worth catching.
 
 ## Requirements
 
-- StarRupture with [ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) **v1.23.0 or later** (interface v75).
+- StarRupture with [ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) **v1.23.0 or later** (interface v73).
   Three loader-side changes were made for this plugin: `hooks->HUD->DebugDraw` (v50) draws the in-world path,
   `AcquireInputPassthrough` (v51) is the cooperative input mode, and `GetMouseWheel` (v52) is what the timeline zooms
   with. v52 also fixed a keybind bug where binding a bare `LeftShift`/`LeftControl` never fired, because Windows

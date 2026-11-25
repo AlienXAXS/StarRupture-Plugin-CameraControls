@@ -54,7 +54,7 @@ static PluginInfo s_pluginInfo = {
 	MODLOADER_BUILD_TAG,
 	"AlienX",
 	"Keyframe camera timeline editor -- fly, keyframe, scrub and play back cinematic camera moves",
-	PLUGIN_INTERFACE_VERSION,
+	PLUGIN_DECLARED_INTERFACE,
 	PLUGIN_TARGET_THIS,
 	PLUGIN_GAME_BUILT_CL,
 	PLUGIN_MAP_MIGRATED
@@ -1477,8 +1477,14 @@ namespace
 
 		DeathGuard::Hold();
 
+		// The host can drop the vitals feature mid-session. Stop pinning at once
+		// and clear the flag; nothing is stored, so the game's own survival
+		// effects take over from wherever the values are. The player's setting
+		// stays as it was, so the lock resumes when the feature returns.
 		if (state.options.lockVitals && CameraControlsFields::VitalsLock.On())
 			Vitals::Pin();
+		else if (Vitals::IsActive())
+			Vitals::Stop();
 
 		if (state.options.protectPlayer)
 			Safeguard::Hold();
