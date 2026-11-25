@@ -33,7 +33,7 @@ namespace CameraControls::FovOverride
 		// The local player's camera manager, but only if it is the class these
 		// offsets belong to.
 		//
-		// The type check is not a nicety. On any other manager class 0x2998 is a
+		// The type check is not a nicety. On any other manager class the offset is a
 		// different member -- or past the end of the object -- and writing it would
 		// be a memory stomp with no symptom until something unrelated breaks.
 		SDK::AAuPlayerCameraManager* GetManager()
