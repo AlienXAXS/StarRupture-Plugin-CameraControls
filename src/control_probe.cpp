@@ -298,25 +298,28 @@ namespace CameraControls::Probe
 		}
 
 		// -------------------------------------------------------------------
-		// Cinematic mode -- the second module to read a UObject by raw offset
+		// Cinematic mode bits
 		//
 		// `APlayerController::bCinematicMode` is not a UPROPERTY, so the generated
 		// header only knows its byte as `BitPad_4D0_0 : 4` sitting below the
-		// exposed `bPlayerIsWaiting : 1` at bit 4. The bit assignments come from
-		// the dump rather than from UE's declaration order:
-		// `APlayerController::SetCinematicMode` (0x144FB5E40) reads `[this+4D0h]`,
-		// does `and edx, ~2` then `or edx, bInCinematicMode*2`, and separately sets
-		// `4` when `bInCinematicMode && bHidePlayer`. So bit 1 is bCinematicMode
-		// and bit 2 is its hide-the-pawn flag, for this build, measured.
+		// exposed `bPlayerIsWaiting : 1`. The byte and the mask of each bit come
+		// from the loader's map for the running build (see cameracontrols_fields.h),
+		// not from this file. The bit assignments come from the dump rather than
+		// from UE's declaration order: `APlayerController::SetCinematicMode`
+		// (0x144FB5E40 on CL-127004) reads `[this+4D0h]`, does `and edx, ~2` then
+		// `or edx, bInCinematicMode*2`, and separately sets `4` when
+		// `bInCinematicMode && bHidePlayer`. So bit 1 is bCinematicMode and bit 2
+		// is its hide-the-pawn flag, measured.
 		//
 		// Bits 0 and 3 stay unnamed. Nothing in the dump pinned them, and labelling
 		// a bit with a guess is how a diagnostic starts lying -- "bit3 no -> yes"
 		// in a diff is enough to go and find out which one it is.
 		//
-		// The read validates itself before it reports: bit 4 of the byte must agree
-		// with the generated `bPlayerIsWaiting` accessor, which sits in the same
-		// byte. If they disagree the offset is wrong on this build and we say so
-		// rather than printing plausible-looking rubbish.
+		// The read validates itself before it reports: the three bits must share one
+		// byte, and the reflected `bPlayerIsWaiting` in that byte must read the same
+		// through the map's mask as through the generated accessor. If either check
+		// fails the byte is not the one we mean on this build and we say so rather
+		// than printing plausible-looking rubbish.
 		//
 		// Worth knowing but NOT the smoking gun for the current bug: UE routes
 		// cinematic mode's input suppression through SetIgnoreMoveInput /
@@ -326,32 +329,45 @@ namespace CameraControls::Probe
 		// -------------------------------------------------------------------
 		void CaptureControllerBits(SDK::APlayerController* pc, Snapshot& snapshot)
 		{
-			constexpr int kBitsOffset      = 0x4D0;
-			constexpr int kWaitingBitIndex = 4;
+			using namespace CameraControlsFields;
+
+			if (!ControlProbe.On())
+				return;
 
 			try
 			{
-				const uint8_t byte =
-					*(reinterpret_cast<const uint8_t*>(pc) + kBitsOffset);
+				if (PcCinematicMode.offset != PcCinematicHidePlayer.offset || PcCinematicMode.offset != PcIsWaiting.offset)
+				{
+					Add(snapshot, "pcbits", "offset",
+					    Str("REJECTED (cinematic bits at 0x%X, hide at 0x%X, waiting at 0x%X)",
+					        PcCinematicMode.offset, PcCinematicHidePlayer.offset, PcIsWaiting.offset));
+					return;
+				}
 
-				const bool rawWaiting    = (byte & (1u << kWaitingBitIndex)) != 0;
+				const uint8_t byte =
+					*(reinterpret_cast<const uint8_t*>(pc) + PcCinematicMode.offset);
+
+				const bool rawWaiting    = (byte & PcIsWaiting.boolMask) != 0;
 				const bool headerWaiting = pc->bPlayerIsWaiting != 0;
 
 				if (rawWaiting != headerWaiting)
 				{
 					// The one check that makes this trustworthy, and it failed.
 					Add(snapshot, "pcbits", "offset",
-					    Str("0x%X REJECTED (bit%d=%d but bPlayerIsWaiting=%d)",
-					        kBitsOffset, kWaitingBitIndex, rawWaiting ? 1 : 0,
+					    Str("0x%X REJECTED (mask 0x%02X=%d but bPlayerIsWaiting=%d)",
+					        PcCinematicMode.offset, PcIsWaiting.boolMask, rawWaiting ? 1 : 0,
 					        headerWaiting ? 1 : 0));
 					return;
 				}
 
+				const uint8_t named = static_cast<uint8_t>(
+					PcCinematicMode.boolMask | PcCinematicHidePlayer.boolMask | PcIsWaiting.boolMask);
+
 				Add(snapshot, "pcbits", "raw",           Str("0x%02X", byte));
-				Add(snapshot, "pcbits", "cinematicMode", Bl((byte & 0x02) != 0));
-				Add(snapshot, "pcbits", "cinemaHidePlayer", Bl((byte & 0x04) != 0));
-				Add(snapshot, "pcbits", "bit0",          Bl((byte & 0x01) != 0));
-				Add(snapshot, "pcbits", "bit3",          Bl((byte & 0x08) != 0));
+				Add(snapshot, "pcbits", "cinematicMode", Bl((byte & PcCinematicMode.boolMask) != 0));
+				Add(snapshot, "pcbits", "cinemaHidePlayer", Bl((byte & PcCinematicHidePlayer.boolMask) != 0));
+				Add(snapshot, "pcbits", "bit0",          Bl((byte & 0x01 & ~named) != 0));
+				Add(snapshot, "pcbits", "bit3",          Bl((byte & 0x08 & ~named) != 0));
 			}
 			catch (...)
 			{

@@ -54,7 +54,7 @@ static PluginInfo s_pluginInfo = {
 	MODLOADER_BUILD_TAG,
 	"AlienX",
 	"Keyframe camera timeline editor -- fly, keyframe, scrub and play back cinematic camera moves",
-	PLUGIN_INTERFACE_VERSION,
+	PLUGIN_DECLARED_INTERFACE,
 	PLUGIN_TARGET_THIS,
 	PLUGIN_GAME_BUILT_CL,
 	PLUGIN_MAP_MIGRATED

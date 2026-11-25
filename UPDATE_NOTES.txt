@@ -1,3 +1,5 @@
 ## Unreleased
 
 - Locking health, food and water now lets go when a host turns the feature off mid-session, and picks up again if it comes back and your setting is still on
+- Declares the interface it needs (73), so it loads on ModLoader v1.23.0 and newer
+- The input diagnostics read the controller's cinematic bits from the loader's version object map, not a built-in offset
