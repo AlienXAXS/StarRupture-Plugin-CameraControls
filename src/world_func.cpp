@@ -3,6 +3,7 @@
 #include "cameracontrols_fields.h"
 
 #include "Chimera_classes.hpp"
+#include "object_ref.h"
 
 #include <cstdio>
 
@@ -17,16 +18,16 @@ namespace CameraControls::WorldFunc
 		constexpr const char* kWaveSubsystemClass = "CrEnviroWaveSubsystem";
 		constexpr int         kMaxMatches         = 8;
 
-		SDK::UCrEnviroWaveSubsystem* g_wave = nullptr;
+		ObjectRef<SDK::UCrEnviroWaveSubsystem> g_wave;
 
 		// Cached because the walk is a synchronous pass over tens of thousands
 		// of GObjects entries and a cue that fires mid-take must not cost a
-		// frame. Dropped on world end-play rather than validated, because there
-		// is nothing safe to validate a dead UObject pointer against.
+		// frame. A weak reference, checked on every use and dropped on world
+		// end-play; a dead one is looked up again.
 		SDK::UCrEnviroWaveSubsystem* FindWaveSubsystem()
 		{
-			if (g_wave)
-				return g_wave;
+			if (auto* cached = g_wave.Get())
+				return cached;
 
 			auto* hooks = GetHooks();
 			if (!hooks || !hooks->ObjectWalker || !hooks->ObjectWalker->IsReady())
@@ -46,16 +47,17 @@ namespace CameraControls::WorldFunc
 				return nullptr;
 			}
 
-			g_wave = static_cast<SDK::UCrEnviroWaveSubsystem*>(matches[0].object);
+			auto* wave = static_cast<SDK::UCrEnviroWaveSubsystem*>(matches[0].object);
+			g_wave.Set(wave);
 			LOG_DEBUG("WorldFunc: resolved %s at %p (%d instance(s))",
-			          kWaveSubsystemClass, static_cast<void*>(g_wave), found);
-			return g_wave;
+			          kWaveSubsystemClass, static_cast<void*>(wave), found);
+			return wave;
 		}
 	}
 
 	void ForgetWorldState()
 	{
-		g_wave = nullptr;
+		g_wave.Reset();
 	}
 
 	bool HoldRuptureProgress(float progress)
