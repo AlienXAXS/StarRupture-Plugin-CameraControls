@@ -54,6 +54,10 @@ namespace CameraControls::DeathGuard
 	// Puts everything back. Safe to call when not engaged.
 	void Release();
 
+	// Retries whatever Release() could not reach. Call once per game-thread tick
+	// while not engaged.
+	void VerifyRelease();
+
 	// Drops cached state without touching the game, for when the world has
 	// already gone away underneath us.
 	void ForgetWorldState();

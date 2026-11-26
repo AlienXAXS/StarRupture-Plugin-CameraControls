@@ -31,6 +31,8 @@ namespace CameraControls::DeathGuard
 		bool          g_bounds       = false;   // layer 1 took effect
 		bool          g_damage       = false;   // layer 2 took effect
 		bool          g_immortal     = false;   // layer 3 took effect
+		// A release that could not reach everything; VerifyRelease finishes it.
+		bool          g_releasePending = false;
 		WorldSnapshot g_world;
 		PawnSnapshot  g_pawn;
 
@@ -95,9 +97,12 @@ namespace CameraControls::DeathGuard
 
 			try
 			{
-				g_world.killZ        = settings->KillZ;
-				g_world.boundsChecks = settings->bEnableWorldBoundsChecks != 0;
-				g_world.valid        = true;
+				if (!g_world.valid)
+				{
+					g_world.killZ        = settings->KillZ;
+					g_world.boundsChecks = settings->bEnableWorldBoundsChecks != 0;
+					g_world.valid        = true;
+				}
 
 				settings->bEnableWorldBoundsChecks = 0;
 				settings->KillZ                    = kNoKillZ;
@@ -120,23 +125,22 @@ namespace CameraControls::DeathGuard
 
 			SDK::AWorldSettings* settings = GetWorldSettings();
 			if (!settings)
-			{
-				// Nothing to put it back on. Not worth a warning on the way out
-				// of a world that is being torn down anyway.
-				g_world = WorldSnapshot{};
-				return;
-			}
+				return;   // kept for the next try
 
 			try
 			{
-				settings->bEnableWorldBoundsChecks = g_world.boundsChecks ? 1 : 0;
-				settings->KillZ                    = g_world.killZ;
+				// Only where the value is still the one this module wrote.
+				if (settings->bEnableWorldBoundsChecks == 0)
+					settings->bEnableWorldBoundsChecks = g_world.boundsChecks ? 1 : 0;
+				if (settings->KillZ == kNoKillZ)
+					settings->KillZ = g_world.killZ;
 				LOG_DEBUG("DeathGuard: world bounds restored (checks=%d killZ=%.0f)",
 				          g_world.boundsChecks ? 1 : 0, g_world.killZ);
 			}
 			catch (...)
 			{
 				LOG_WARN("DeathGuard: restoring the world bounds threw");
+				return;
 			}
 
 			g_world = WorldSnapshot{};
@@ -154,8 +158,11 @@ namespace CameraControls::DeathGuard
 
 			try
 			{
-				g_pawn.canBeDamaged = pawn->bCanBeDamaged != 0;
-				g_pawn.valid        = true;
+				if (!g_pawn.valid)
+				{
+					g_pawn.canBeDamaged = pawn->bCanBeDamaged != 0;
+					g_pawn.valid        = true;
+				}
 
 				pawn->bCanBeDamaged = 0;
 
@@ -176,18 +183,20 @@ namespace CameraControls::DeathGuard
 				return;
 
 			SDK::APawn* pawn = GetPawn();
-			if (pawn)
+			if (!pawn)
+				return;
+
+			try
 			{
-				try
-				{
+				if (pawn->bCanBeDamaged == 0)
 					pawn->bCanBeDamaged = g_pawn.canBeDamaged ? 1 : 0;
-					LOG_DEBUG("DeathGuard: pawn damage restored to %d",
-					          g_pawn.canBeDamaged ? 1 : 0);
-				}
-				catch (...)
-				{
-					LOG_WARN("DeathGuard: restoring pawn damage threw");
-				}
+				LOG_DEBUG("DeathGuard: pawn damage restored to %d",
+				          g_pawn.canBeDamaged ? 1 : 0);
+			}
+			catch (...)
+			{
+				LOG_WARN("DeathGuard: restoring pawn damage threw");
+				return;
 			}
 
 			g_pawn = PawnSnapshot{};
@@ -203,6 +212,10 @@ namespace CameraControls::DeathGuard
 		// caller has to ask for it explicitly.
 		void ApplyGameImmortality()
 		{
+			// `Immortal` toggles, so asking twice would switch it off again.
+			if (g_immortal)
+				return;
+
 			SDK::APlayerController* pc = GetController();
 			if (!pc)
 			{
@@ -254,11 +267,15 @@ namespace CameraControls::DeathGuard
 			if (!g_immortal)
 				return;
 
-			g_immortal = false;
-
 			SDK::APlayerController* pc = GetController();
-			if (!pc || !pc->CheatManager)
+			if (!pc)
 				return;
+
+			if (!pc->CheatManager)
+			{
+				g_immortal = false;
+				return;
+			}
 
 			try
 			{
@@ -272,6 +289,7 @@ namespace CameraControls::DeathGuard
 					static_cast<SDK::UCrCheatManager*>(pc->CheatManager)->Immortal();
 					LOG_DEBUG("DeathGuard: Immortal toggled back off");
 				}
+				g_immortal = false;
 			}
 			catch (...)
 			{
@@ -291,6 +309,7 @@ namespace CameraControls::DeathGuard
 		g_bounds   = false;
 		g_damage   = false;
 		g_immortal = false;
+		g_releasePending = false;
 		g_world    = WorldSnapshot{};
 		g_pawn     = PawnSnapshot{};
 		g_reassertedDamage = false;
@@ -306,6 +325,7 @@ namespace CameraControls::DeathGuard
 		// guard still needs Release() to run -- the alternative is a world left
 		// with its bounds checks off for the rest of the session.
 		g_engaged = true;
+		g_releasePending = false;
 		g_reassertedDamage = false;
 		g_reassertedBounds = false;
 
@@ -387,7 +407,24 @@ namespace CameraControls::DeathGuard
 		RestoreDamage();
 		RestoreBounds();
 
+		if (g_world.valid || g_pawn.valid || g_immortal)
+		{
+			if (!g_releasePending)
+				LOG_WARN("DeathGuard: could not restore everything yet -- will retry");
+			g_releasePending = true;
+			g_engaged        = false;
+			g_bounds         = false;
+			g_damage         = false;
+			return;
+		}
+
 		ForgetWorldState();
 		LOG_INFO("DeathGuard: released");
+	}
+
+	void VerifyRelease()
+	{
+		if (g_releasePending)
+			Release();
 	}
 }
