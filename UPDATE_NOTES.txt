@@ -1,2 +1,3 @@
 - The input diagnostics read the controller's cinematic bits from the loader's version object map, not a built-in offset
 - The field of view and viewport tools take their game values from the version map alone, with no built-in values
+- You can now install and update it from the mod loader's Browse list.
