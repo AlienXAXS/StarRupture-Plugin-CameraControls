@@ -60,6 +60,8 @@ static PluginInfo s_pluginInfo = {
 	PLUGIN_MAP_MIGRATED
 };
 
+PLUGIN_EXPORT_HOST_INFO()
+
 namespace
 {
 	constexpr const char* kWorldName = "ChimeraMain";
@@ -686,6 +688,29 @@ namespace
 	// Func frames
 	// -----------------------------------------------------------------------
 
+	// True while a pause made by one of this plugin's cues is still in force.
+	bool g_pausedRupture = false;
+
+	void NoteRupturePause(FuncAction action)
+	{
+		switch (action)
+		{
+			case FuncAction::PauseRupture:
+				g_pausedRupture = true;
+				break;
+
+			case FuncAction::StartRupture:
+			case FuncAction::SetRupturePhase:
+			case FuncAction::CancelRupture:
+			case FuncAction::ResumeRupture:
+				g_pausedRupture = false;
+				break;
+
+			default:
+				break;
+		}
+	}
+
 	// Runs one cue and says so, in the log and on screen. Both, deliberately:
 	// a cue that changes the world without leaving a trace is indistinguishable
 	// from one that never ran, and this is the only part of the plugin whose
@@ -694,6 +719,8 @@ namespace
 	{
 		std::string message;
 		const bool ok = WorldFunc::Execute(frame, message);
+		if (ok)
+			NoteRupturePause(frame.action);
 
 		if (ok)
 			LOG_INFO("FuncFrame: %s -- %s", FuncActionName(frame.action), message.c_str());
@@ -813,6 +840,8 @@ namespace
 
 		std::string message;
 		const bool ok = WorldFunc::Execute(undo, message);
+		if (ok)
+			NoteRupturePause(undo.action);
 
 		if (ok)
 			LOG_INFO("FuncFrame: scrubbed back over '%s', ran '%s' -- %s",
@@ -1371,6 +1400,60 @@ namespace
 	// -----------------------------------------------------------------------
 	// Engine callbacks
 	// -----------------------------------------------------------------------
+	// Read once a tick. Older loaders have no such query, which means not denied.
+	bool HostDenied()
+	{
+		const auto query = PluginOptHostDenied(g_self->hooks->Network);
+		return query && query(g_self) == 1;
+	}
+
+	// Finishes whatever a teardown could not do on its own tick. Only for when
+	// no session is running; each call is a no-op once its restore has landed.
+	void PumpRestores()
+	{
+		Safeguard::VerifyRestore();
+
+		// The game's input mapping removal is deferred, so a quick
+		// open-then-close can land our re-bind *before* the removal it is meant
+		// to undo, and only re-checking afterwards catches that.
+		Rig::VerifyInputRestore();
+		DeathGuard::VerifyRelease();
+		Rig::VerifyDeactivate();
+
+		if (ViewportFit::IsActive())
+			ViewportFit::Restore();
+
+		if (Hud::IsHidden())
+			Hud::Show();
+	}
+
+	// The whole mod is denied. Closes anything open through the normal exit path
+	// and keeps retrying its restores. The editor stays closed once allowed.
+	void TickDenied(State& state, double now)
+	{
+		state.requests.clear();
+		state.lookActive = false;
+		DismissOpenNotice(state);
+		ExitEditor(state, now);
+
+		if (g_pausedRupture)
+		{
+			FuncFrame resume;
+			resume.action = FuncAction::ResumeRupture;
+
+			std::string message;
+			if (WorldFunc::Execute(resume, message))
+			{
+				LOG_INFO("FuncFrame: resumed the rupture this plugin paused");
+				g_pausedRupture = false;
+			}
+		}
+
+		ReleaseInput();
+		Input::ReleaseAllKeys(state);
+		PumpRestores();
+	}
+
 	void OnEngineTick(float deltaSeconds)
 	{
 		// Learn which OS thread the engine considers its game thread, so
@@ -1379,13 +1462,22 @@ namespace
 		// the engine asserts IsInGameThread() but does not expose it to us.
 		g_gameThreadId.store(::GetCurrentThreadId(), std::memory_order_relaxed);
 
+		const bool denied = HostDenied();
+
 		// Takes the state lock briefly on its own; must not run inside the
 		// lock held below.
-		Input::PumpMouseLook();
+		if (!denied)
+			Input::PumpMouseLook();
 
 		const double now = Now();
 		auto lock = Lock();
 		State& state = Get();
+
+		if (denied)
+		{
+			TickDenied(state, now);
+			return;
+		}
 
 		// Drain first: a request may change the mode the rest of this tick runs in.
 		if (!state.requests.empty())
@@ -1424,14 +1516,16 @@ namespace
 		}
 
 		// Runs while idle, because that is exactly when it matters: Release() has
-		// already happened and the editor is shut. No-op unless the restore did
-		// not take.
-		Safeguard::VerifyRestore();
-
-		// Same idea for the input mappings. The game's removal is deferred, so a
-		// quick open-then-close can land our re-bind *before* the removal it is
-		// meant to undo, and only re-checking afterwards catches that.
-		Rig::VerifyInputRestore();
+		// already happened and the editor is shut.
+		if (state.mode == Mode::Off)
+		{
+			PumpRestores();
+		}
+		else
+		{
+			Safeguard::VerifyRestore();
+			Rig::VerifyInputRestore();
+		}
 
 		// Every mode, every tick, silent unless the count moves. Deliberately
 		// before the mode gate: the drop this is hunting has to be pinned to a
@@ -1476,6 +1570,7 @@ namespace
 		state.gameViewSupported = ViewportFit::IsSupported();
 
 		DeathGuard::Hold();
+		state.fovLive = Rig::FovIsLive();
 
 		// The host can drop the vitals feature mid-session. Stop pinning at once
 		// and clear the flag; nothing is stored, so the game's own survival
@@ -1527,6 +1622,7 @@ namespace
 			return;
 
 		g_inChimeraMain = false;
+		g_pausedRupture = false;
 
 		// The world is going away underneath every actor we cached, so drop the
 		// pointers without trying to tidy up through them.
