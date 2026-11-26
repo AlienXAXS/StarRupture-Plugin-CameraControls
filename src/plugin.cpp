@@ -321,7 +321,7 @@ namespace
 	// -----------------------------------------------------------------------
 	void EnterEditor(State& state, double now)
 	{
-		if (state.mode != Mode::Off)
+		if (state.mode != Mode::Off || !CameraControlsFields::CameraEditor.On())
 			return;
 
 		// The notice is already up and waiting for an answer. Falling through
@@ -619,6 +619,12 @@ namespace
 		if (state.mode != Mode::Editor)
 			return;
 
+		if (!CameraControlsFields::PathPlayback.On())
+		{
+			SetStatus(state, now, "Path playback is turned off right now");
+			return;
+		}
+
 		if (state.timeline.TotalDuration() <= 0.0)
 		{
 			SetStatus(state, now, "Add at least two keyframes first");
@@ -717,6 +723,12 @@ namespace
 	// effects outlive the session.
 	void FireFuncFrame(State& state, const FuncFrame& frame, double now)
 	{
+		if (!CameraControlsFields::TimelineCues.On())
+		{
+			SetStatus(state, now, "Timeline cues are turned off right now");
+			return;
+		}
+
 		std::string message;
 		const bool ok = WorldFunc::Execute(frame, message);
 		if (ok)
@@ -748,6 +760,12 @@ namespace
 
 	void HoldFuncRamps(State& state, double now)
 	{
+		if (!CameraControlsFields::TimelineCues.On())
+		{
+			ResetFuncRamp();
+			return;
+		}
+
 		const double playhead = state.playhead;
 
 		const FuncFrame* active = nullptr;
@@ -832,6 +850,9 @@ namespace
 	// firing normally and there is no way to tell them apart afterwards.
 	void RewindFuncFrame(State& state, const FuncFrame& original, double now)
 	{
+		if (!CameraControlsFields::TimelineCues.On())
+			return;
+
 		FuncFrame undo = original;
 		undo.action = ReverseOf(original.action);
 
@@ -1044,6 +1065,12 @@ namespace
 
 			case Request::DumpControlProbe:
 			{
+				if (!CameraControlsFields::ControlProbe.On())
+				{
+					SetStatus(state, now, "Input diagnostics are turned off right now");
+					break;
+				}
+
 				// Physical keys first, then the engine, so a single keypress
 				// produces both halves of the picture in the log next to each
 				// other: what the keyboard has down, and what the engine did with
@@ -1400,13 +1427,6 @@ namespace
 	// -----------------------------------------------------------------------
 	// Engine callbacks
 	// -----------------------------------------------------------------------
-	// Read once a tick. Older loaders have no such query, which means not denied.
-	bool HostDenied()
-	{
-		const auto query = PluginOptHostDenied(g_self->hooks->Network);
-		return query && query(g_self) == 1;
-	}
-
 	// Finishes whatever a teardown could not do on its own tick. Only for when
 	// no session is running; each call is a no-op once its restore has landed.
 	void PumpRestores()
@@ -1427,28 +1447,40 @@ namespace
 			Hud::Show();
 	}
 
-	// The whole mod is denied. Closes anything open through the normal exit path
-	// and keeps retrying its restores. The editor stays closed once allowed.
-	void TickDenied(State& state, double now)
+	// Resumes a rupture this plugin's cues left paused. A no-op unless one is;
+	// a resume that fails is tried again on the next call.
+	void ResumePausedRupture()
 	{
+		if (!g_pausedRupture)
+			return;
+
+		FuncFrame resume;
+		resume.action = FuncAction::ResumeRupture;
+
+		std::string message;
+		if (WorldFunc::Execute(resume, message))
+		{
+			LOG_INFO("FuncFrame: resumed the rupture this plugin paused");
+			g_pausedRupture = false;
+		}
+	}
+
+	// The editor is turned off. Closes anything open through the normal exit path
+	// and keeps retrying its restores. The editor stays closed once it is back.
+	void TickEditorOff(State& state, double now)
+	{
+		// The input diagnostics are their own feature and keep working.
+		for (Request request : std::vector<Request>(state.requests))
+		{
+			if (request == Request::DumpControlProbe && CameraControlsFields::ControlProbe.On())
+				HandleRequest(state, request, now);
+		}
+
 		state.requests.clear();
 		state.lookActive = false;
 		DismissOpenNotice(state);
 		ExitEditor(state, now);
-
-		if (g_pausedRupture)
-		{
-			FuncFrame resume;
-			resume.action = FuncAction::ResumeRupture;
-
-			std::string message;
-			if (WorldFunc::Execute(resume, message))
-			{
-				LOG_INFO("FuncFrame: resumed the rupture this plugin paused");
-				g_pausedRupture = false;
-			}
-		}
-
+		ResumePausedRupture();
 		ReleaseInput();
 		Input::ReleaseAllKeys(state);
 		PumpRestores();
@@ -1462,22 +1494,25 @@ namespace
 		// the engine asserts IsInGameThread() but does not expose it to us.
 		g_gameThreadId.store(::GetCurrentThreadId(), std::memory_order_relaxed);
 
-		const bool denied = HostDenied();
+		const bool editorOn = CameraControlsFields::CameraEditor.On();
 
 		// Takes the state lock briefly on its own; must not run inside the
 		// lock held below.
-		if (!denied)
+		if (editorOn)
 			Input::PumpMouseLook();
 
 		const double now = Now();
 		auto lock = Lock();
 		State& state = Get();
 
-		if (denied)
+		if (!editorOn)
 		{
-			TickDenied(state, now);
+			TickEditorOff(state, now);
 			return;
 		}
+
+		if (!CameraControlsFields::TimelineCues.On())
+			ResumePausedRupture();
 
 		// Drain first: a request may change the mode the rest of this tick runs in.
 		if (!state.requests.empty())
@@ -1531,7 +1566,8 @@ namespace
 		// before the mode gate: the drop this is hunting has to be pinned to a
 		// frame, and it could just as easily land while the plugin is idle as
 		// during a session.
-		Probe::WatchInputMappings(state);
+		if (CameraControlsFields::ControlProbe.On())
+			Probe::WatchInputMappings(state);
 
 		if (state.mode == Mode::Off)
 			return;
@@ -1583,6 +1619,13 @@ namespace
 
 		if (state.options.protectPlayer)
 			Safeguard::Hold();
+
+		if (!CameraControlsFields::PathPlayback.On())
+		{
+			if (state.mode == Mode::Playback)
+				StopPlayback(state, now);
+			state.playing = false;
+		}
 
 		if (state.mode == Mode::Editor)
 			TickEditor(state, deltaSeconds, now);

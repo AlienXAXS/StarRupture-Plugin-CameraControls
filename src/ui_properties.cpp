@@ -769,14 +769,18 @@ namespace CameraControls::UI::Properties
 			ui->GetContentRegionAvail(&availX, &availY);
 			const float rowHeight = ui->GetFrameHeight() * 1.15f;
 
+			const bool cuesOn = CameraControlsFields::TimelineCues.On();
+			ui->BeginDisabled(!cuesOn);
 			if (AccentButton(ui, CC_ICON_BOLT "  Trigger now", availX, rowHeight))
 				Post(state, Request::FireSelectedFunc);
 			ItemTooltip(ui, "Runs this cue against the world immediately, so it can be tried "
 			                "without recording a take.\n\n"
 			                "It changes the actual save you are playing -- there is no undo for a "
 			                "rupture.");
+			ui->EndDisabled();
 
-			ui->TextDisabled("Cues fire whenever the playhead moves forward over them.");
+			ui->TextDisabled(cuesOn ? "Cues fire whenever the playhead moves forward over them."
+			                        : "Timeline cues are turned off right now.");
 			HelpMarker(ui, "During a take, during preview play, and while you scrub -- so the "
 			               "world keeps up with wherever you have dragged the playhead to.\n\n"
 			               "Scrubbing backwards runs each cue's inverse where it has one, so "

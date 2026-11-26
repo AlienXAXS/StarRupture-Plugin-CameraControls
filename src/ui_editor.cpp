@@ -5,6 +5,7 @@
 #include "ui_timeline.h"
 #include "ui_viewport.h"
 #include "editor_state.h"
+#include "cameracontrols_fields.h"
 #include "plugin_helpers.h"
 
 #include <algorithm>
@@ -257,6 +258,7 @@ namespace CameraControls::UI::Editor
 			ItemTooltip(ui, "Previous keyframe");
 
 			ui->SameLine(0.0f, 4.0f);
+			ui->BeginDisabled(!CameraControlsFields::PathPlayback.On());
 			if (ToggleButton(ui, state.playing ? CC_ICON_PAUSE "##transportPlay"
 			                                   : CC_ICON_PLAY  "##transportPlay",
 			                 state.playing, w, h))
@@ -268,6 +270,7 @@ namespace CameraControls::UI::Editor
 			ItemTooltip(ui, "Preview play / pause.\n\n"
 			                "The camera follows the playhead if 'Camera follows the playhead' "
 			                "is on in the inspector.");
+			ui->EndDisabled();
 
 			ui->SameLine(0.0f, 4.0f);
 			if (ui->ButtonSized(CC_ICON_FORWARD "##transportNext", w, h))
@@ -296,10 +299,12 @@ namespace CameraControls::UI::Editor
 			ui->SameLine(0.0f, 14.0f);
 			ui->AlignTextToFramePadding();
 
-			char current[32], length[32], readout[80];
+			char current[32], length[32], readout[128];
 			FormatTime(state.playhead, current, sizeof(current));
 			FormatTime(total, length, sizeof(length));
-			snprintf(readout, sizeof(readout), "%s / %s", current, length);
+			snprintf(readout, sizeof(readout), "%s / %s%s", current, length,
+			         CameraControlsFields::PathPlayback.On()
+			             ? "" : "   Playback is turned off right now");
 			TextColored(ui, kPlayhead, readout);
 
 			// --- Capture ------------------------------------------------------
@@ -329,7 +334,7 @@ namespace CameraControls::UI::Editor
 
 			// --- Record --------------------------------------------------------
 			ui->SameLine(0.0f, 18.0f);
-			ui->BeginDisabled(timeline.Count() < 2);
+			ui->BeginDisabled(timeline.Count() < 2 || !CameraControlsFields::PathPlayback.On());
 			ui->PushStyleColor(Col_Button,        kDanger.r * 0.65f, kDanger.g * 0.65f, kDanger.b * 0.65f, 1.0f);
 			ui->PushStyleColor(Col_ButtonHovered, kDanger.r, kDanger.g, kDanger.b, 1.0f);
 			ui->PushStyleColor(Col_ButtonActive,  kDanger.r, kDanger.g, kDanger.b, 1.0f);
