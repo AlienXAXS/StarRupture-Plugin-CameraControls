@@ -24,6 +24,12 @@ namespace CameraControls::FovOverride
 		bool  g_engaged   = false;
 		bool  g_haveSaved = false;
 		float g_saved     = 0.0f;
+		float g_written   = 0.0f;
+		bool  g_hasWritten = false;
+
+		// The FOV feature was off when the override was wanted, so Apply() has
+		// to arm it once the feature is back.
+		bool  g_awaitFeature = false;
 
 		// Edge-triggered divergence report. Apply() runs every frame, so this may
 		// only log on a change.
@@ -99,6 +105,8 @@ namespace CameraControls::FovOverride
 		g_haveSaved = false;
 		g_saved     = 0.0f;
 		g_diverged  = false;
+		g_hasWritten   = false;
+		g_awaitFeature = false;
 	}
 
 	bool Engage()
@@ -107,7 +115,10 @@ namespace CameraControls::FovOverride
 			return true;
 
 		if (!IsSupported())
+		{
+			g_awaitFeature = g_supported;
 			return false;
+		}
 
 		SDK::AAuPlayerCameraManager* manager = GetManager();
 		if (!manager)
@@ -150,6 +161,8 @@ namespace CameraControls::FovOverride
 			g_engaged    = true;
 			g_diverged   = false;
 			g_lastWanted = reported;
+			g_hasWritten   = false;
+			g_awaitFeature = false;
 
 			LOG_DEBUG("FovOverride: armed -- manager FOV %.2f, AdditionalFOVOffset %.2f, "
 			          "engine reports %.2f", fov, offset, reported);
@@ -164,8 +177,23 @@ namespace CameraControls::FovOverride
 
 	void Apply(float fov)
 	{
-		if (!g_engaged)
+		if (!IsSupported())
+		{
+			// A feature switched off hands the game its FOV back.
+			const bool wanted = g_supported && (g_engaged || g_awaitFeature);
+			Release();
+			g_awaitFeature = wanted;
 			return;
+		}
+
+		if (!g_engaged)
+		{
+			// Armed now and applied from the next frame, once the engine has
+			// composited the game's own value.
+			if (g_awaitFeature)
+				Engage();
+			return;
+		}
 
 		SDK::AAuPlayerCameraManager* manager = GetManager();
 		if (!manager)
@@ -188,6 +216,8 @@ namespace CameraControls::FovOverride
 				return;
 
 			*additionalAt = wanted - live;
+			g_written    = *additionalAt;
+			g_hasWritten = true;
 
 			// Did it take? `GetFOVAngle` is last composite's answer, so it lags a
 			// frame -- which is why this only judges a *settled* FOV. A value the
@@ -224,6 +254,8 @@ namespace CameraControls::FovOverride
 
 	void Release()
 	{
+		g_awaitFeature = false;
+
 		if (!g_haveSaved)
 		{
 			g_engaged = false;
@@ -231,22 +263,25 @@ namespace CameraControls::FovOverride
 		}
 
 		SDK::AAuPlayerCameraManager* manager = GetManager();
-		if (manager)
+		if (!manager)
+			return;   // still engaged, so a later call can finish it
+
+		try
 		{
-			try
+			float* additionalAt = Fields::AdditionalFovOffset.In(manager);
+			if (additionalAt && g_hasWritten && *additionalAt == g_written)
 			{
-				if (float* additionalAt = Fields::AdditionalFovOffset.In(manager))
-				{
-					*additionalAt = g_saved;
-					LOG_DEBUG("FovOverride: AdditionalFOVOffset restored to %.2f", g_saved);
-				}
-			}
-			catch (...)
-			{
-				LOG_WARN("FovOverride: restoring AdditionalFOVOffset threw -- the game's FOV "
-				         "may stay where the editor left it until the camera config changes");
+				*additionalAt = g_saved;
+				LOG_DEBUG("FovOverride: AdditionalFOVOffset restored to %.2f", g_saved);
 			}
 		}
+		catch (...)
+		{
+			LOG_WARN("FovOverride: restoring AdditionalFOVOffset threw -- the game's FOV "
+			         "may stay where the editor left it until the camera config changes");
+		}
+
+		g_hasWritten = false;
 
 		g_engaged   = false;
 		g_haveSaved = false;

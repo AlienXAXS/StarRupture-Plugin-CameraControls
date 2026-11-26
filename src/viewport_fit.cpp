@@ -157,7 +157,10 @@ namespace CameraControls::ViewportFit
 	bool Apply(float x, float y, float width, float height)
 	{
 		if (!IsSupported())
+		{
+			Restore();
 			return false;
+		}
 
 		SDK::ULocalPlayer* player = GetLocalPlayer();
 		if (!player)
@@ -218,13 +221,7 @@ namespace CameraControls::ViewportFit
 
 		SDK::ULocalPlayer* player = GetLocalPlayer();
 		if (!player)
-		{
-			// Nothing to write through. The world is either gone or between
-			// controllers; either way the engine will lay the players out
-			// again from scratch.
-			g_active = false;
-			return;
-		}
+			return;   // still active, so a later call can finish it
 
 		try
 		{
