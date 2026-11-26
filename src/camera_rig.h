@@ -34,6 +34,10 @@ namespace CameraControls::Rig
 	// to destroy. Entering the editor cuts too, so this is symmetrical anyway.
 	void Deactivate();
 
+	// Finishes a Deactivate that had no player to restore to. Call once per
+	// game-thread tick while no session is running.
+	void VerifyDeactivate();
+
 	bool IsActive();
 
 	// Hands keyboard focus and mouse capture back to the game viewport.

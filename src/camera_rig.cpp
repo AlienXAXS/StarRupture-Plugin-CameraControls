@@ -35,6 +35,11 @@ namespace CameraControls::Rig
 		bool g_streamingSourceWasEnabled = false;
 		bool g_touchedStreamingSource    = false;
 
+		// Restores that found no controller to work through, retried by the
+		// Verify calls.
+		bool g_deactivatePending = false;
+		bool g_inputModePending  = false;
+
 		// --- Input restore ---------------------------------------------------
 		//
 		// The game's contextual input configs that an alive, on-foot player has
@@ -279,6 +284,13 @@ namespace CameraControls::Rig
 		// through them would fault.
 		g_inputVerifyTicks   = 0;
 		g_mappingsAtActivate = -1;
+
+		// Nothing left to hand back to.
+		g_deactivatePending        = false;
+		g_inputModePending         = false;
+		g_previousTargetAtActivate = nullptr;
+		g_haveControlRotation      = false;
+		g_touchedStreamingSource   = false;
 	}
 
 	bool FovIsLive() { return FovOverride::IsEngaged(); }
@@ -401,6 +413,15 @@ namespace CameraControls::Rig
 	{
 		if (IsActive())
 			return true;
+
+		// An unfinished restore still owns the saved values.
+		if (g_deactivatePending)
+		{
+			Deactivate();
+			if (g_deactivatePending)
+				return false;
+		}
+		g_inputModePending = false;
 
 		try
 		{
@@ -539,7 +560,7 @@ namespace CameraControls::Rig
 
 	void Deactivate()
 	{
-		if (!g_active && !g_camera)
+		if (!g_active && !g_camera && !g_touchedStreamingSource && !FovOverride::IsEngaged())
 			return;
 
 		SDK::ACameraActor* camera = g_camera;
@@ -558,12 +579,18 @@ namespace CameraControls::Rig
 		// written would follow the player out of the editor.
 		FovOverride::Release();
 
+		bool pending = false;
+
 		try
 		{
 			SDK::UWorld* world = GetWorld();
 			SDK::APlayerController* pc = GetLocalController(world);
 
-			if (pc)
+			if (!pc || (!g_previousTargetAtActivate && !pc->Pawn))
+			{
+				pending = true;
+			}
+			else
 			{
 				if (g_touchedStreamingSource)
 				{
@@ -583,7 +610,6 @@ namespace CameraControls::Rig
 				          static_cast<void*>(g_previousTargetAtActivate),
 				          static_cast<void*>(pc->Pawn));
 
-				if (restore)
 				{
 					pc->SetViewTargetWithBlend(
 						restore, 0.0f,
@@ -594,11 +620,6 @@ namespace CameraControls::Rig
 					// target changes, so setting it first is simply discarded.
 					if (g_haveControlRotation)
 						pc->SetControlRotation(g_controlRotationAtActivate);
-				}
-				else
-				{
-					LOG_WARN("Rig: no view target to restore -- the player may be left "
-					         "looking through nothing until they respawn");
 				}
 			}
 		}
@@ -618,10 +639,35 @@ namespace CameraControls::Rig
 			LOG_WARN("Rig: destroying the camera actor threw -- leaking it");
 		}
 
+		// Never kept past this tick; a retry aims at the pawn of that moment.
 		g_previousTargetAtActivate = nullptr;
-		g_haveControlRotation      = false;
-		g_touchedStreamingSource   = false;
+
+		if (pending)
+		{
+			if (!g_deactivatePending)
+				LOG_WARN("Rig: no player to hand the view back to yet -- will retry");
+			g_deactivatePending = true;
+			return;
+		}
+
+		g_deactivatePending      = false;
+		g_haveControlRotation    = false;
+		g_touchedStreamingSource = false;
 		LOG_INFO("Rig: camera actor released");
+	}
+
+	void VerifyDeactivate()
+	{
+		if (g_deactivatePending)
+		{
+			SDK::APlayerController* pc = GetLocalController(GetWorld());
+			if (pc && pc->Pawn)
+				Deactivate();
+		}
+		else if (!g_active && FovOverride::IsEngaged())
+		{
+			FovOverride::Release();
+		}
 	}
 
 	void RestoreGameInputMode()
@@ -631,9 +677,14 @@ namespace CameraControls::Rig
 			SDK::APlayerController* pc = GetLocalController(GetWorld());
 			if (!pc)
 			{
-				LOG_WARN("Rig: cannot restore the game input mode -- no player controller");
+				if (!g_inputModePending)
+					LOG_WARN("Rig: no player controller to restore the game input mode on "
+					         "yet -- will retry");
+				g_inputModePending = true;
 				return;
 			}
+
+			g_inputModePending = false;
 
 			// bFlushInput = true. The flush is wanted, not incidental: see the
 			// header on swallowed key releases.
@@ -644,6 +695,7 @@ namespace CameraControls::Rig
 		}
 		catch (...)
 		{
+			g_inputModePending = false;
 			LOG_WARN("Rig: restoring the game input mode threw");
 		}
 	}
@@ -715,6 +767,12 @@ namespace CameraControls::Rig
 			if (!pc || !pc->Pawn)
 			{
 				LOG_WARN("Rig: cannot restore input configs -- no pawn");
+				if (repair)
+				{
+					// The watchdog binds them once a pawn is there.
+					g_inputVerifyTicks  = kInputVerifyTicks;
+					g_inputVerifyLogged = false;
+				}
 				return;
 			}
 
@@ -761,10 +819,11 @@ namespace CameraControls::Rig
 
 	void VerifyInputRestore()
 	{
+		if (g_inputModePending)
+			RestoreGameInputMode();
+
 		if (g_inputVerifyTicks <= 0)
 			return;
-
-		--g_inputVerifyTicks;
 
 		// Nothing to compare against means nothing to verify. Better to do nothing
 		// than to re-bind on a guess and risk duplicating mappings.
@@ -773,6 +832,13 @@ namespace CameraControls::Rig
 			g_inputVerifyTicks = 0;
 			return;
 		}
+
+		// Wait for a pawn without spending the retry budget.
+		SDK::APlayerController* owner = GetLocalController(GetWorld());
+		if (!owner || !owner->Pawn)
+			return;
+
+		--g_inputVerifyTicks;
 
 		const int live = Probe::ActionMappingCount();
 		if (live < 0)
