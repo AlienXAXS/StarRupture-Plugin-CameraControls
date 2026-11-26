@@ -1,6 +1,7 @@
 #include "ui_timeline.h"
 #include "ui_theme.h"
 #include "input_binds.h"
+#include "cameracontrols_fields.h"
 
 #include <algorithm>
 #include <cmath>
@@ -744,7 +745,8 @@ namespace CameraControls::UI::TimelineView
 			                "point on the timeline, splitting whichever clip is there so "
 			                "nothing after it moves.");
 
-			if (ui->BeginMenu(CC_ICON_BOLT "  Add cue", true))
+			const bool cuesOn = CameraControlsFields::TimelineCues.On();
+			if (ui->BeginMenu(CC_ICON_BOLT "  Add cue", cuesOn))
 			{
 				for (int i = 1; i < static_cast<int>(FuncAction::Count); ++i)
 				{
@@ -757,6 +759,8 @@ namespace CameraControls::UI::TimelineView
 			}
 			ItemTooltip(ui, "Cues change the world rather than the camera, and only fire "
 			                "during a take.");
+			if (!cuesOn)
+				ui->TextDisabled("Timeline cues are turned off right now.");
 
 			ui->Separator();
 

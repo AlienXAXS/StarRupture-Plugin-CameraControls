@@ -547,7 +547,9 @@ namespace CameraControls::Input
 				case Action::NextKeyframe: SelectNeighbour(state, +1); break;
 
 				case Action::PlayPause:
-					if (state.timeline.TotalDuration() > 0.0)
+					if (!CameraControlsFields::PathPlayback.On())
+						SetStatus(state, now, "Playback is turned off right now");
+					else if (state.timeline.TotalDuration() > 0.0)
 					{
 						state.playing = !state.playing;
 						if (state.playing && state.playhead >= state.timeline.TotalDuration() - 1e-6)

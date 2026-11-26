@@ -1132,9 +1132,12 @@ namespace CameraControls::UI::Properties
 			               "is continuous and frame-rate independent. Set it to whatever you "
 			               "record at, or to 1 to nudge in whole seconds.");
 
+			const bool playbackOn = CameraControlsFields::PathPlayback.On();
 			FullWidthItem(ui);
+			ui->BeginDisabled(!playbackOn);
 			ui->SliderFloat("##countdown", &state.options.countdownSeconds, 0.0f, 10.0f,
 			                "Countdown  %.0f s");
+			ui->EndDisabled();
 			HelpMarker(ui, "Pre-roll before playback starts, so there is time to get a "
 			               "recorder running.");
 
@@ -1144,7 +1147,11 @@ namespace CameraControls::UI::Properties
 			               "who is not looking through this camera.\n\n"
 			               "This is the same switch the game's own cinematic-mode key throws, "
 			               "and whatever state you had it in is restored when you leave.");
+			ui->BeginDisabled(!playbackOn);
 			ui->Checkbox("Keep drawing gizmos while playing", &state.options.gizmosDuringPlayback);
+			ui->EndDisabled();
+			if (!playbackOn)
+				ui->TextDisabled("Playback is turned off right now.");
 
 			ui->Spacing();
 

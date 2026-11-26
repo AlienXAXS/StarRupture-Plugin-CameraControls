@@ -166,11 +166,14 @@ namespace CameraControlsFields
 	// all list the contextual input bindings: without them the player's keys
 	// cannot be given back, so none of the three may run.
 	inline PluginMap::Feature CameraEditor{ "editor", "Camera editor and free camera",
-		PluginMap::KeysOf(ContextualInputBindings, ExclusiveInputBindings, DefaultInputMappings,
-		                  DefaultMappingContext, DefaultMappingPriority, BindingSize, MappingSize),
-		{ "Keybinds.*", "Editor.*" } };
+		PluginMap::KeysOf(ContextualInputBindings, BindingSize),
+		{ "Keybinds.*", "Editor.*", "Camera.*",
+		  "Safety.ProtectPlayer", "Safety.SpawnHabitat", "Safety.PreventDeath",
+		  "Safety.GameImmortality", "Safety.StashAltitude", "Safety.ShowPlayerMarker" } };
 	inline PluginMap::Feature PathPlayback{ "playback", "Path playback and preview",
-		CameraEditor.keys, { "Keybinds.TogglePlayback", "Keybinds.PlayPause" } };
+		CameraEditor.keys,
+		{ "Keybinds.TogglePlayback", "Keybinds.PlayPause", "Camera.CountdownSeconds",
+		  "Editor.GizmosDuringPlayback" } };
 	inline PluginMap::Feature TimelineCues{ "cues", "Timeline cues",
 		CameraEditor.keys, {} };
 	inline PluginMap::Feature FovControl{ "fov", "Field of view control",
