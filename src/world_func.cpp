@@ -122,7 +122,7 @@ namespace CameraControls::WorldFunc
 					// is already running -- which means there has to be one.
 					if (!CameraControlsFields::RupturePhase.On())
 					{
-						outMessage = "Rupture phase cues are unavailable on this game build";
+						outMessage = "Rupture phase cues are turned off right now";
 						return false;
 					}
 

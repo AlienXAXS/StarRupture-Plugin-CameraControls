@@ -247,6 +247,8 @@ namespace CameraControls
 		// which the inspector says out loud -- a FOV slider that edits the keyframe
 		// but never changes the picture is exactly the bug that module exists for.
 		bool       fovLive   = false;
+		// False while the FOV feature is off or its probe failed on this build.
+		bool       fovSupported = true;
 
 		// The view the engine is *actually* rendering, read back from the
 		// camera manager every tick.

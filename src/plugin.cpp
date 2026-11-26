@@ -8,6 +8,7 @@
 #include "death_guard.h"
 #include "editor_state.h"
 #include "fly_controls.h"
+#include "fov_override.h"
 #include "hud_visibility.h"
 #include "input_binds.h"
 #include "player_safeguard.h"
@@ -1606,7 +1607,8 @@ namespace
 		state.gameViewSupported = ViewportFit::IsSupported();
 
 		DeathGuard::Hold();
-		state.fovLive = Rig::FovIsLive();
+		state.fovLive      = Rig::FovIsLive();
+		state.fovSupported = FovOverride::IsSupported();
 
 		// The host can drop the vitals feature mid-session. Stop pinning at once
 		// and clear the flag; nothing is stored, so the game's own survival

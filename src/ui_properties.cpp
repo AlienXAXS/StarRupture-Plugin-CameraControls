@@ -197,21 +197,28 @@ namespace CameraControls::UI::Properties
 
 			LabelRow(ui, "Rotation  pitch / yaw / roll");
 
+			const bool fovOn = CameraControlsFields::FovControl.On();
 			FullWidthItem(ui);
+			ui->BeginDisabled(!fovOn || !state.fovSupported);
 			if (ui->SliderFloat("##fov", &key.fov, 5.0f, 170.0f, "FOV  %.1f deg"))
 			{
 				state.dirty = true;
 				poseEdited  = true;
 			}
+			ui->EndDisabled();
 
-			// Said out loud rather than left to be discovered. This slider edits the
-			// keyframe either way -- the gizmo and the saved project honour it -- but
-			// with the override unarmed the game's camera manager keeps overwriting
+			// Said out loud rather than left to be discovered. The slider edits the
+			// keyframe -- the gizmo and the saved project honour it -- but with the
+			// override unarmed the game's camera manager keeps overwriting
 			// the rendered FOV, and a control that moves the number without moving
 			// the picture is the exact bug `fov_override` exists to fix.
-			if (state.rigActive && !state.fovLive)
+			if (!fovOn)
+				ui->TextDisabled("Field of view control is turned off right now.");
+			else if (state.rigActive && !state.fovLive)
 			{
-				TextColored(ui, kDanger, "FOV is not reaching the screen on this build");
+				TextColored(ui, kDanger, state.fovSupported
+				                             ? "FOV is not reaching the screen right now"
+				                             : "FOV is not reaching the screen on this build");
 				ItemTooltip(ui, "The game's camera manager is overriding the FOV and the "
 				                "plugin could not hook it -- see the log for what the probe "
 				                "found.\n\n"
@@ -770,7 +777,9 @@ namespace CameraControls::UI::Properties
 			const float rowHeight = ui->GetFrameHeight() * 1.15f;
 
 			const bool cuesOn = CameraControlsFields::TimelineCues.On();
-			ui->BeginDisabled(!cuesOn);
+			const bool phaseOff = frame.action == FuncAction::SetRupturePhase &&
+			                      !CameraControlsFields::RupturePhase.On();
+			ui->BeginDisabled(!cuesOn || phaseOff);
 			if (AccentButton(ui, CC_ICON_BOLT "  Trigger now", availX, rowHeight))
 				Post(state, Request::FireSelectedFunc);
 			ItemTooltip(ui, "Runs this cue against the world immediately, so it can be tried "
@@ -779,8 +788,9 @@ namespace CameraControls::UI::Properties
 			                "rupture.");
 			ui->EndDisabled();
 
-			ui->TextDisabled(cuesOn ? "Cues fire whenever the playhead moves forward over them."
-			                        : "Timeline cues are turned off right now.");
+			ui->TextDisabled(!cuesOn  ? "Timeline cues are turned off right now."
+			                 : phaseOff ? "Rupture phase cues are turned off right now."
+			                            : "Cues fire whenever the playhead moves forward over them.");
 			HelpMarker(ui, "During a take, during preview play, and while you scrub -- so the "
 			               "world keeps up with wherever you have dragged the playhead to.\n\n"
 			               "Scrubbing backwards runs each cue's inverse where it has one, so "
@@ -1173,7 +1183,9 @@ namespace CameraControls::UI::Properties
 			               "Turn it off when the exact framing matters. The keyframe handles "
 			               "line up correctly either way.");
 
-			if (!state.gameViewSupported)
+			if (!CameraControlsFields::ViewportMask.On())
+				ui->TextDisabled("Masking the game view is turned off right now.");
+			else if (!state.gameViewSupported)
 				ui->TextDisabled("Unavailable: this game build lays its viewport out differently.");
 
 			ui->Checkbox("Show path gizmos in the world", &state.options.showGizmos);
