@@ -1,3 +1,4 @@
+- New default keys, so Camera Controls no longer shares a key with other mods: Ctrl+Shift+F7 editor, F5 playback, H hide the editor windows, Insert insert a keyframe, Ctrl+Shift+Home diagnostic snapshot. Keys you changed are kept
 - The input diagnostics read the controller's cinematic bits from the loader's version object map, not a built-in offset
 - The field of view and viewport tools take their game values from the version map alone, with no built-in values
 - You can now install and update it from the mod loader's Browse list.

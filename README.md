@@ -49,13 +49,13 @@ game's actual camera.
 ## Getting started
 
 1. Load a save.
-2. Press **F7** to open the editor. The first press shows a short notice — the editor takes your character out of the
+2. Press **Ctrl+Shift+F7** to open the editor. The first press shows a short notice — the editor takes your character out of the
    world while it is open, and a timeline cue can start a real rupture in the save you are playing, so it asks you to
    save first. Answer it once and it stays out of the way until the game is restarted.
 3. Fly to where the shot should start and press **K** to drop the first keyframe.
 4. Fly somewhere else, press **K** again. Repeat.
-5. Press **Space** to preview, or **F8** to run it properly.
-6. Press **F7** again to put everything back.
+5. Press **Space** to preview, or **F5** to run it properly.
+6. Press **Ctrl+Shift+F7** again to put everything back.
 
 The keybind cheat-sheet stays pinned to the top-left corner the whole time you are in the editor, showing your actual
 bindings rather than the defaults. **Right-click the timeline track** for a menu that adds a keyframe or a world cue
@@ -67,11 +67,15 @@ wherever you clicked.
 
 All of these are rebindable from the ModLoader's plugin config UI (or `CameraControls.ini`).
 
+Some defaults are new, so they no longer share a key with other mods. If you are updating, a key that was still on its
+old default moves to the new one the first time this version runs. Keys you changed are kept, and so is a key whose
+new default you had already given to another Camera Controls action.
+
 | Key | Action |
 |---|---|
-| `F7` | Enter / leave the editor |
-| `F8` | Start / stop playback mode |
-| `F9` | Hide / show the editor windows (the camera still flies) |
+| `Ctrl+Shift+F7` | Enter / leave the editor |
+| `F5` | Start / stop playback mode |
+| `H` | Hide / show the editor windows (the camera still flies) |
 | `Esc` | Stop a take and go back to the editor |
 | `W` `A` `S` `D` | Fly forward / left / back / right |
 | `E` / `Q` | Fly up / down |
@@ -82,13 +86,13 @@ All of these are rebindable from the ModLoader's plugin config UI (or `CameraCon
 | `X` | Level the camera — zero all rotation without moving it |
 | `R` / `F` | Zoom in / out (FOV) |
 | `K` | Add a keyframe at the camera |
-| `I` | Insert a keyframe after the selected one |
+| `Insert` | Insert a keyframe after the selected one |
 | `U` | Re-record the selected keyframe from the camera |
 | `G` | Fly the camera to the selected keyframe |
 | `Delete` | Delete the selected keyframe |
 | `,` / `.` | Select the previous / next keyframe |
 | `Space` | Preview play / pause |
-| `Home` | Write a diagnostic snapshot of the player's control state to the log (works any time, see below) |
+| `Ctrl+Shift+Home` | Write a diagnostic snapshot of the player's control state to the log (works any time, see below) |
 
 **On the timeline:** click a keyframe to select it, drag it to retime, double-click it to fly there, click a clip to
 select the segment, wheel to zoom about the cursor, middle-drag to pan. The `-60 … +60` nudge buttons move the
@@ -259,7 +263,7 @@ not have to do anything. If you ever do lose your keys, closing and re-opening t
 
 ### If something still will not respond
 
-Press **`Home`**. It writes a full snapshot of everything that can stop a character responding to input — the
+Press **`Ctrl+Shift+Home`**. It writes a full snapshot of everything that can stop a character responding to input — the
 controller's ignore-input counters, view target, possessed pawn, input component, movement mode, the game's own
 character state, the live input mappings, and whether the game window even has OS keyboard focus — to the log at
 `VeryVerbose`, diffed against the previous snapshot and against the state before the editor was opened.
