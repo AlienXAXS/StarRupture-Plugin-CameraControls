@@ -45,6 +45,8 @@ namespace CameraControls::Safeguard
 
 		bool         g_engaged = false;
 		Snapshot     g_snapshot;
+		// A release that found no body to put back; VerifyRestore finishes it.
+		bool         g_releasePending = false;
 		SDK::FVector g_stashLocation{};
 		SDK::AActor* g_habitat = nullptr;
 
@@ -189,6 +191,7 @@ namespace CameraControls::Safeguard
 	void ForgetWorldState()
 	{
 		g_engaged        = false;
+		g_releasePending = false;
 		g_habitat        = nullptr;
 		g_snapshot       = Snapshot{};
 		g_restoreRetries = 0;
@@ -196,6 +199,14 @@ namespace CameraControls::Safeguard
 
 	bool Engage(double stashAltitude, bool spawnHabitat)
 	{
+		// An unfinished release still owns the snapshot; it goes back first.
+		if (g_releasePending)
+		{
+			Release();
+			if (g_releasePending)
+				return false;
+		}
+
 		if (g_engaged)
 			return true;
 
@@ -356,6 +367,15 @@ namespace CameraControls::Safeguard
 
 		SDK::ACharacter* character = GetLocalCharacter();
 
+		if (g_snapshot.valid && !character)
+		{
+			if (!g_releasePending)
+				LOG_WARN("Safeguard: no body to restore yet -- keeping the snapshot");
+			g_releasePending = true;
+			g_engaged        = false;
+			return;
+		}
+
 		// Captured before ForgetWorldState wipes them, so the retry pass below
 		// still knows where the body was meant to end up.
 		const Snapshot     snapshot = g_snapshot;
@@ -503,16 +523,24 @@ namespace CameraControls::Safeguard
 
 	void VerifyRestore()
 	{
+		if (g_releasePending)
+		{
+			if (GetLocalCharacter())
+			{
+				g_releasePending = false;
+				Release();
+			}
+			return;
+		}
+
 		if (g_restoreRetries <= 0)
 			return;
 
 		SDK::ACharacter* character = GetLocalCharacter();
 		if (!character)
 		{
-			// No pawn to work on yet -- respawning, or mid-travel. Burn a retry
-			// rather than giving up: the pawn usually comes back within a frame or
-			// two, and that is precisely the case worth waiting for.
-			--g_restoreRetries;
+			// No pawn to work on yet -- respawning, or mid-travel. Wait for it
+			// without spending a retry.
 			return;
 		}
 
