@@ -192,15 +192,21 @@ namespace CameraControls::Hud
 		if (!g_hidden)
 			return;
 
+		// No HUD to reach yet: stay hidden so the caller tries again.
+		SDK::AHUD* hud = FindHud();
+		if (!hud)
+			return;
+
 		try
 		{
-			if (g_hud && g_hudFlagTaken)
+			// The saved pointers are only compared, never trusted on their own.
+			if (g_hudFlagTaken && hud == g_hud && hud->bShowHUD == 0)
 			{
 				// Put back what was there, not a hard "true" -- the player may
 				// have had the HUD off with the game's own key before the
 				// editor was ever opened, and coming out of a shot should not
 				// silently turn it back on.
-				g_hud->bShowHUD = g_previousShowHud ? 1 : 0;
+				hud->bShowHUD = g_previousShowHud ? 1 : 0;
 			}
 		}
 		catch (...)
@@ -210,7 +216,8 @@ namespace CameraControls::Hud
 
 		try
 		{
-			if (g_layout)
+			if (g_layout && FindLayoutWidget() == g_layout &&
+			    g_layout->GetVisibility() == SDK::ESlateVisibility::Collapsed)
 			{
 				// Restore whatever it was, rather than forcing Visible -- the
 				// layout is normally SelfHitTestInvisible and forcing Visible
