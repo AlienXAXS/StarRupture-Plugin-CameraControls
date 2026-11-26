@@ -18,12 +18,12 @@ namespace CameraControls::UI::Editor
 	void Unregister(IPluginSelf* self);
 
 	// Shows or hides the editor's widget windows. Called by the game thread on
-	// a mode change, and when the user toggles the UI off with F9.
+	// a mode change, and when the user toggles the UI off.
 	void SetVisible(bool visible);
 
 	// Shows or hides the pre-open notice. Separate from SetVisible because it is
 	// the one piece of this UI that appears while the mode is still Off -- and it
-	// must not come back with the editor windows when F9 shows them again.
+	// must not come back with the editor windows when the UI is shown again.
 	void SetNoticeVisible(bool visible);
 
 	// Re-frames the timeline view. Called when the editor is opened, not every

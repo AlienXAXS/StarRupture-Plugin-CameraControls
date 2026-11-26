@@ -1127,7 +1127,7 @@ namespace
 
 	void TickEditor(State& state, double dt, double now)
 	{
-		// F9 has to actually unregister the windows from rendering, not just
+		// The ToggleUI key has to actually unregister the windows from rendering, not just
 		// make their callbacks return early -- an early return still leaves an
 		// empty titled box sitting on screen.
 		static bool s_windowsShown = true;

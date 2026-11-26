@@ -485,7 +485,7 @@ namespace CameraControls::UI::Editor
 				Clamp(state.options.flySpeed * factor, kFlySpeedMin, kFlySpeedMax);
 
 			// Worth a status line: the speed is otherwise invisible unless the
-			// inspector happens to be scrolled to it, and F9 may have hidden the
+			// inspector happens to be scrolled to it, and the ToggleUI key may have hidden the
 			// inspector entirely. The number is the feedback.
 			char message[48];
 			snprintf(message, sizeof(message), "Fly speed  %.0f u/s", state.options.flySpeed);

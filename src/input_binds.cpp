@@ -46,9 +46,9 @@ namespace CameraControls::Input
 		};
 
 		const BindDef kBinds[] = {
-			{ Action::ToggleEditor,    "ToggleEditor",    "F7",          false },
-			{ Action::TogglePlayback,  "TogglePlayback",  "F8",          false },
-			{ Action::ToggleUI,        "ToggleUI",        "F9",          false },
+			{ Action::ToggleEditor,    "ToggleEditor",    "Ctrl+Shift+F7", false },
+			{ Action::TogglePlayback,  "TogglePlayback",  "F5",          false },
+			{ Action::ToggleUI,        "ToggleUI",        "H",           false },
 			{ Action::ExitPlayback,    "ExitPlayback",    "Escape",      false },
 
 			// Diagnostic dump. Deliberately bound outside the editor's own keys
@@ -56,12 +56,12 @@ namespace CameraControls::Input
 			// idle and the character will not respond -- at which point every
 			// editor key is inert by design.
 			//
-			// Home rather than the obvious F10: F10 is a Windows *system* key, so
+			// On Home rather than the obvious F10: F10 is a Windows *system* key, so
 			// pressing it sends WM_SYSKEYDOWN and, unhandled, activates the window
 			// menu -- which steals focus and stops input reaching the game. For a
 			// key whose entire job is diagnosing input that has stopped reaching
 			// the game, that is the one thing it must not do.
-			{ Action::DumpProbe,       "DumpProbe",       "Home",        false },
+			{ Action::DumpProbe,       "DumpProbe",       "Ctrl+Shift+Home", false },
 
 			{ Action::FlyForward,      "FlyForward",      "W",           true  },
 			{ Action::FlyBack,         "FlyBack",         "S",           true  },
@@ -79,17 +79,13 @@ namespace CameraControls::Input
 
 			{ Action::CaptureKeyframe, "CaptureKeyframe", "K",           false },
 
-			// "I", not the more obvious "Shift+K". Shift and Ctrl are the boost and
-			// crawl modifiers, so *any* Shift+ or Ctrl+ default collides with
-			// ordinary flying: the hand holding Shift to cover ground is the one
-			// reaching for K, and every keyframe taken at speed came out as an
-			// insert rather than an append (and, with nothing selected, an insert at
-			// the *front* of the timeline). Modifier shadowing below stops that
+			// A plain key, not the more obvious "Shift+K". Shift and Ctrl are the
+			// boost and crawl modifiers, so a Shift+ or Ctrl+ default collides
+			// with ordinary flying: every keyframe taken at speed came out as an
+			// insert rather than an append (and, with nothing selected, an insert
+			// at the *front* of the timeline). Modifier shadowing below stops that
 			// being two keyframes; only a plain key stops it being the wrong one.
-			//
-			// Existing installs keep whatever their ini already says -- the schema
-			// only supplies a default for a key that is absent.
-			{ Action::InsertKeyframe,  "InsertKeyframe",  "I",           false },
+			{ Action::InsertKeyframe,  "InsertKeyframe",  "Insert",      false },
 			{ Action::UpdateKeyframe,  "UpdateKeyframe",  "U",           false },
 			{ Action::GotoKeyframe,    "GotoKeyframe",    "G",           false },
 			{ Action::DeleteKeyframe,  "DeleteKeyframe",  "Delete",      false },
@@ -196,6 +192,68 @@ namespace CameraControls::Input
 			}
 
 			return shape;
+		}
+
+		bool SameBind(const std::string& a, const std::string& b)
+		{
+			const BindShape left = ParseBindName(a), right = ParseBindName(b);
+			return left.mods == right.mods && NamesEqual(left.baseKey, right.baseKey);
+		}
+
+		// Once per install: a key still saved as its earlier default moves to the
+		// current one. A key the player changed stays, as does one whose new key
+		// another of these bindings is already on. DumpProbe has no config entry,
+		// so it only ever follows the table.
+		void ApplyNewDefaultKeys(IPluginSelf* self)
+		{
+			if (self->config->ReadInt(self, "General", "NewDefaultKeysApplied", 0) != 0)
+				return;
+
+			static const struct { const char* key; const char* old; } kEarlierDefaults[] = {
+				{ "ToggleEditor", "F7" }, { "TogglePlayback", "F8" },
+				{ "ToggleUI", "F9" },     { "InsertKeyframe", "I" },
+			};
+
+			bool allWritten = true;
+			for (const auto& earlier : kEarlierDefaults)
+			{
+				char saved[64] = {};
+				self->config->ReadString(self, "Keybinds", earlier.key, saved, sizeof(saved), "");
+				if (!SameBind(saved, earlier.old))
+					continue;
+
+				const char* current = nullptr;
+				for (const BindDef& def : kBinds)
+				{
+					if (strcmp(def.configKey, earlier.key) == 0)
+						current = def.fallback;
+				}
+
+				const char* taken = nullptr;
+				for (const BindDef& other : kBinds)
+				{
+					if (strcmp(other.configKey, earlier.key) == 0)
+						continue;
+
+					char buffer[64] = {};
+					if (SameBind(CameraControlsConfig::Config::GetKeybind(
+					                 other.configKey, other.fallback, buffer, sizeof(buffer)),
+					             current))
+						taken = other.configKey;
+				}
+
+				if (taken)
+					LOG_INFO("Input: %s stays on %s -- %s already uses %s",
+					         earlier.key, saved, taken, current);
+				else if (self->config->WriteString(self, "Keybinds", earlier.key, current))
+					LOG_INFO("Input: %s moved from %s to the new default %s",
+					         earlier.key, saved, current);
+				else
+					allWritten = false;
+			}
+
+			if (allWritten)
+				self->config->WriteInt(self, "General", "NewDefaultKeysApplied", 1);
 		}
 
 		// The loader's `SampleCurrentModifiers`, reproduced exactly: same API, same
@@ -664,6 +722,8 @@ namespace CameraControls::Input
 		}
 
 		auto* input = self->hooks->Input;
+
+		ApplyNewDefaultKeys(self);
 
 		// Resolve every name first, then register. The shadow test compares each
 		// bind against all the others, so it needs the whole table settled before

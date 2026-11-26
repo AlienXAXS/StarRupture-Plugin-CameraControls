@@ -10,13 +10,15 @@ namespace CameraControlsConfig
 	static const ConfigEntry CONFIG_ENTRIES[] = {
 		{ "General", "Enabled", ConfigValueType::Boolean, "true",
 		  "Enable or disable the plugin" },
+		{ "General", "NewDefaultKeysApplied", ConfigValueType::Hidden, "0",
+		  "Remembers that the newer default keys were applied once" },
 
 		// --- Mode keys -------------------------------------------------------
-		{ "Keybinds", "ToggleEditor", ConfigValueType::Keybind, "F7",
+		{ "Keybinds", "ToggleEditor", ConfigValueType::Keybind, "Ctrl+Shift+F7",
 		  "Enter / leave the camera timeline editor" },
-		{ "Keybinds", "TogglePlayback", ConfigValueType::Keybind, "F8",
+		{ "Keybinds", "TogglePlayback", ConfigValueType::Keybind, "F5",
 		  "Start / stop timeline playback" },
-		{ "Keybinds", "ToggleUI", ConfigValueType::Keybind, "F9",
+		{ "Keybinds", "ToggleUI", ConfigValueType::Keybind, "H",
 		  "Hide / show the editor windows without leaving editor mode" },
 		{ "Keybinds", "ExitPlayback", ConfigValueType::Keybind, "Escape",
 		  "Stop playback and return to the editor" },
@@ -40,7 +42,7 @@ namespace CameraControlsConfig
 		// --- Editing ---------------------------------------------------------
 		{ "Keybinds", "CaptureKeyframe", ConfigValueType::Keybind, "K",
 		  "Add a keyframe at the current camera pose" },
-		{ "Keybinds", "InsertKeyframe",  ConfigValueType::Keybind, "I",
+		{ "Keybinds", "InsertKeyframe",  ConfigValueType::Keybind, "Insert",
 		  "Insert a keyframe after the selected one" },
 		{ "Keybinds", "UpdateKeyframe",  ConfigValueType::Keybind, "U",
 		  "Overwrite the selected keyframe with the current camera pose" },
