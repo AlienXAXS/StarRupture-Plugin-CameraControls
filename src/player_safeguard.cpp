@@ -376,6 +376,10 @@ namespace CameraControls::Safeguard
 			return;
 		}
 
+		// A release that had to wait may be looking at a different body, such as
+		// a respawn, which must stay where it is.
+		const bool deferred = g_releasePending;
+
 		// Captured before ForgetWorldState wipes them, so the retry pass below
 		// still knows where the body was meant to end up.
 		const Snapshot     snapshot = g_snapshot;
@@ -392,29 +396,32 @@ namespace CameraControls::Safeguard
 					character->CharacterMovement->Velocity = SDK::FVector(0.0, 0.0, 0.0);
 				}
 
-				// Move back BEFORE handing movement over. Restoring MOVE_Walking
-				// while the body is still parked in mid-air (or underground)
-				// leaves the movement component with a floor cache for a place
-				// the character is about to stop being, and it stays stuck --
-				// which is why control did not come back.
-				//
-				// TeleportTo first, because it finds a free spot rather than
-				// stuffing the capsule into whatever happens to be there. But it
-				// also runs encroachment checks and is allowed to *fail*, and a
-				// failure leaves the body several thousand units down in solid
-				// rock. So if it did not move, force it: a body in slightly the
-				// wrong place is recoverable, a body still in the hole is not.
-				character->K2_TeleportTo(g_snapshot.location, g_snapshot.rotation);
-
-				if (StillAtStash(character->K2_GetActorLocation()))
+				if (!deferred || StillAtStash(character->K2_GetActorLocation()))
 				{
-					LOG_WARN("Safeguard: TeleportTo would not move the body out of the stash "
-					         "-- forcing it to %.0f,%.0f,%.0f",
-					         g_snapshot.location.X, g_snapshot.location.Y, g_snapshot.location.Z);
+					// Move back BEFORE handing movement over. Restoring MOVE_Walking
+					// while the body is still parked in mid-air (or underground)
+					// leaves the movement component with a floor cache for a place
+					// the character is about to stop being, and it stays stuck --
+					// which is why control did not come back.
+					//
+					// TeleportTo first, because it finds a free spot rather than
+					// stuffing the capsule into whatever happens to be there. But it
+					// also runs encroachment checks and is allowed to *fail*, and a
+					// failure leaves the body several thousand units down in solid
+					// rock. So if it did not move, force it: a body in slightly the
+					// wrong place is recoverable, a body still in the hole is not.
+					character->K2_TeleportTo(g_snapshot.location, g_snapshot.rotation);
 
-					SDK::FHitResult hit{};
-					character->K2_SetActorLocation(g_snapshot.location, /*bSweep=*/false, &hit,
-					                               /*bTeleport=*/true);
+					if (StillAtStash(character->K2_GetActorLocation()))
+					{
+						LOG_WARN("Safeguard: TeleportTo would not move the body out of the stash "
+						         "-- forcing it to %.0f,%.0f,%.0f",
+						         g_snapshot.location.X, g_snapshot.location.Y, g_snapshot.location.Z);
+
+						SDK::FHitResult hit{};
+						character->K2_SetActorLocation(g_snapshot.location, /*bSweep=*/false, &hit,
+						                               /*bTeleport=*/true);
+					}
 				}
 
 				if (character->CharacterMovement)
@@ -526,10 +533,7 @@ namespace CameraControls::Safeguard
 		if (g_releasePending)
 		{
 			if (GetLocalCharacter())
-			{
-				g_releasePending = false;
 				Release();
-			}
 			return;
 		}
 
