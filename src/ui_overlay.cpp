@@ -51,7 +51,7 @@ namespace CameraControls::UI::Overlay
 
 			{ RowKind::Section, nullptr,           nullptr,       "KEYFRAMES" },
 			{ RowKind::Bind,    "CaptureKeyframe", "K",           "add at camera" },
-			{ RowKind::Bind,    "InsertKeyframe",  "Insert",      "insert after selected" },
+			{ RowKind::Bind,    "InsertKeyframe",  CameraControlsConfig::DefaultKeys::kInsertKeyframe, "insert after selected" },
 			{ RowKind::Bind,    "UpdateKeyframe",  "U",           "re-record selected" },
 			{ RowKind::Bind,    "GotoKeyframe",    "G",           "fly to selected" },
 			{ RowKind::Bind,    "DeleteKeyframe",  "Delete",      "delete selected" },
@@ -63,16 +63,16 @@ namespace CameraControls::UI::Overlay
 
 			{ RowKind::Section, nullptr,           nullptr,       "TRANSPORT" },
 			{ RowKind::Bind,    "PlayPause",       "SpaceBar",    "preview play / pause" },
-			{ RowKind::Bind,    "TogglePlayback",  "F5",          "record playback" },
+			{ RowKind::Bind,    "TogglePlayback",  CameraControlsConfig::DefaultKeys::kTogglePlayback, "record playback" },
 			{ RowKind::Bind,    "ExitPlayback",    "Escape",      "stop a take" },
-			{ RowKind::Bind,    "ToggleUI",        "H",           "hide / show this UI" },
-			{ RowKind::Bind,    "ToggleEditor",    "Ctrl+Shift+F7", "leave editor" },
+			{ RowKind::Bind,    "ToggleUI",        CameraControlsConfig::DefaultKeys::kToggleUI, "hide / show this UI" },
+			{ RowKind::Bind,    "ToggleEditor",    CameraControlsConfig::DefaultKeys::kToggleEditor, "leave editor" },
 		};
 
 		constexpr int kHintCount = static_cast<int>(sizeof(kHints) / sizeof(kHints[0]));
 
 		std::string g_hintKeys[kHintCount];
-		std::string g_playbackKey = "F5";       // shown on the recording chrome
+		std::string g_playbackKey = CameraControlsConfig::DefaultKeys::kTogglePlayback;       // shown on the recording chrome
 		std::string g_exitPlaybackKey = "Escape";
 
 		// Full-screen rect helper -- the display size is the viewport in the

@@ -1811,8 +1811,9 @@ extern "C" {
 				LoadOptionsFromConfig(Get());
 			}
 
-			UI::Overlay::CacheKeybindNames();
+			// Register first: it can move saved keys, and the overlay copies them.
 			Input::Register(self);
+			UI::Overlay::CacheKeybindNames();
 			UI::Editor::Register(self);
 
 			if (self->hooks && self->hooks->World)

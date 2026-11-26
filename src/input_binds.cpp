@@ -46,9 +46,9 @@ namespace CameraControls::Input
 		};
 
 		const BindDef kBinds[] = {
-			{ Action::ToggleEditor,    "ToggleEditor",    "Ctrl+Shift+F7", false },
-			{ Action::TogglePlayback,  "TogglePlayback",  "F5",          false },
-			{ Action::ToggleUI,        "ToggleUI",        "H",           false },
+			{ Action::ToggleEditor,    "ToggleEditor",    CameraControlsConfig::DefaultKeys::kToggleEditor, false },
+			{ Action::TogglePlayback,  "TogglePlayback",  CameraControlsConfig::DefaultKeys::kTogglePlayback, false },
+			{ Action::ToggleUI,        "ToggleUI",        CameraControlsConfig::DefaultKeys::kToggleUI, false },
 			{ Action::ExitPlayback,    "ExitPlayback",    "Escape",      false },
 
 			// Diagnostic dump. Deliberately bound outside the editor's own keys
@@ -56,12 +56,12 @@ namespace CameraControls::Input
 			// idle and the character will not respond -- at which point every
 			// editor key is inert by design.
 			//
-			// On Home rather than the obvious F10: F10 is a Windows *system* key, so
+			// On a Home combination rather than the obvious F10: F10 is a Windows *system* key, so
 			// pressing it sends WM_SYSKEYDOWN and, unhandled, activates the window
 			// menu -- which steals focus and stops input reaching the game. For a
 			// key whose entire job is diagnosing input that has stopped reaching
 			// the game, that is the one thing it must not do.
-			{ Action::DumpProbe,       "DumpProbe",       "Ctrl+Shift+Home", false },
+			{ Action::DumpProbe,       "DumpProbe",       CameraControlsConfig::DefaultKeys::kDumpProbe, false },
 
 			{ Action::FlyForward,      "FlyForward",      "W",           true  },
 			{ Action::FlyBack,         "FlyBack",         "S",           true  },
@@ -85,7 +85,7 @@ namespace CameraControls::Input
 			// insert rather than an append (and, with nothing selected, an insert
 			// at the *front* of the timeline). Modifier shadowing below stops that
 			// being two keyframes; only a plain key stops it being the wrong one.
-			{ Action::InsertKeyframe,  "InsertKeyframe",  "Insert",      false },
+			{ Action::InsertKeyframe,  "InsertKeyframe",  CameraControlsConfig::DefaultKeys::kInsertKeyframe, false },
 			{ Action::UpdateKeyframe,  "UpdateKeyframe",  "U",           false },
 			{ Action::GotoKeyframe,    "GotoKeyframe",    "G",           false },
 			{ Action::DeleteKeyframe,  "DeleteKeyframe",  "Delete",      false },

@@ -4,6 +4,18 @@
 
 namespace CameraControlsConfig
 {
+	// The defaults that replaced earlier ones. Each is written only here: the
+	// schema, the bind table, the cheat-sheet and the one-time move of saved
+	// keys all read it.
+	namespace DefaultKeys
+	{
+		inline constexpr const char* kToggleEditor   = "Ctrl+Shift+F7";
+		inline constexpr const char* kTogglePlayback = "F5";
+		inline constexpr const char* kToggleUI       = "H";
+		inline constexpr const char* kInsertKeyframe = "Insert";
+		inline constexpr const char* kDumpProbe      = "Ctrl+Shift+Home";
+	}
+
 	// Config schema — the .ini is created from this on first run.
 	// Keybind entries are rebindable from the modloader's plugin config UI;
 	// the modloader re-registers them automatically when the user changes one.
@@ -14,11 +26,11 @@ namespace CameraControlsConfig
 		  "Remembers that the newer default keys were applied once" },
 
 		// --- Mode keys -------------------------------------------------------
-		{ "Keybinds", "ToggleEditor", ConfigValueType::Keybind, "Ctrl+Shift+F7",
+		{ "Keybinds", "ToggleEditor", ConfigValueType::Keybind, DefaultKeys::kToggleEditor,
 		  "Enter / leave the camera timeline editor" },
-		{ "Keybinds", "TogglePlayback", ConfigValueType::Keybind, "F5",
+		{ "Keybinds", "TogglePlayback", ConfigValueType::Keybind, DefaultKeys::kTogglePlayback,
 		  "Start / stop timeline playback" },
-		{ "Keybinds", "ToggleUI", ConfigValueType::Keybind, "H",
+		{ "Keybinds", "ToggleUI", ConfigValueType::Keybind, DefaultKeys::kToggleUI,
 		  "Hide / show the editor windows without leaving editor mode" },
 		{ "Keybinds", "ExitPlayback", ConfigValueType::Keybind, "Escape",
 		  "Stop playback and return to the editor" },
@@ -42,7 +54,7 @@ namespace CameraControlsConfig
 		// --- Editing ---------------------------------------------------------
 		{ "Keybinds", "CaptureKeyframe", ConfigValueType::Keybind, "K",
 		  "Add a keyframe at the current camera pose" },
-		{ "Keybinds", "InsertKeyframe",  ConfigValueType::Keybind, "Insert",
+		{ "Keybinds", "InsertKeyframe",  ConfigValueType::Keybind, DefaultKeys::kInsertKeyframe,
 		  "Insert a keyframe after the selected one" },
 		{ "Keybinds", "UpdateKeyframe",  ConfigValueType::Keybind, "U",
 		  "Overwrite the selected keyframe with the current camera pose" },
