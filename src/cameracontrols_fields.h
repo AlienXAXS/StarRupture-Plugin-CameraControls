@@ -162,8 +162,17 @@ namespace CameraControlsFields
 
 	// The parts of the plugin that can be off while the rest runs. A member that
 	// does not resolve on a game build turns off the part that reads it, and the
-	// config entries it drives are greyed out. The contextual input bindings
-	// stay core: without them the player's keys cannot be given back.
+	// config entries it drives are greyed out. The editor, playback and cues
+	// all list the contextual input bindings: without them the player's keys
+	// cannot be given back, so none of the three may run.
+	inline PluginMap::Feature CameraEditor{ "editor", "Camera editor and free camera",
+		PluginMap::KeysOf(ContextualInputBindings, ExclusiveInputBindings, DefaultInputMappings,
+		                  DefaultMappingContext, DefaultMappingPriority, BindingSize, MappingSize),
+		{ "Keybinds.*", "Editor.*" } };
+	inline PluginMap::Feature PathPlayback{ "playback", "Path playback and preview",
+		CameraEditor.keys, { "Keybinds.TogglePlayback", "Keybinds.PlayPause" } };
+	inline PluginMap::Feature TimelineCues{ "cues", "Timeline cues",
+		CameraEditor.keys, {} };
 	inline PluginMap::Feature FovControl{ "fov", "Field of view control",
 		{ "AAuPlayerCameraManager::FOV", "AAuPlayerCameraManager::AdditionalFOVOffset" },
 		{ "Keybinds.FovIn", "Keybinds.FovOut" } };
@@ -205,6 +214,7 @@ namespace CameraControlsFields
 	inline void DeclareFeatures(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
 		PluginMap::DeclareFeatures(scanner, self,
+			CameraEditor, PathPlayback, TimelineCues,
 			FovControl, ViewportMask, VitalsLock, RupturePhase, ControlProbe, CinematicBits);
 	}
 
